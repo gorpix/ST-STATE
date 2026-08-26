@@ -1,0 +1,16 @@
+{
+  "name": "st-state",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "ST-STATE: transactional state engine for the ST-ENDGAME SillyTavern preset.",
+  "license": "MIT",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test",
+    "lint": "node scripts/lint.mjs",
+    "typecheck": "node scripts/typecheck.mjs",
+    "verify": "node scripts/build.mjs && node scripts/lint.mjs && node scripts/typecheck.mjs && node --test"
+  }
+}
+
