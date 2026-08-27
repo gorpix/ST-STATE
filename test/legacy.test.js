@@ -51,6 +51,15 @@ test('explicit legacy actor IDs survive import/export without renaming', () => {
     assert.equal(roundTrip.relations.pairs['QZ|US'].b, 'US');
 });
 
+test('old BONDS code labels resolve to actors parsed from NPC STATE', () => {
+    const source = `<!-- GFX_START -->\n<internal_states>\n<details><summary>🎬 INTERNAL STATES (Turn: 3)</summary>\n<details><summary>👥 NPC STATE</summary>\n- Ryan | At: room | Doing: waiting | Agenda: None | VAD: 0/0/0 | Focus: door | Aware: room | Fibs: None | Circle: None | Body: well\n</details>\n<details><summary>💚 BONDS</summary>\n- US ↔ RY | BOND: 2 | Sparks: 0 | Grudge: 0\n- Profile RY→US: Type=friend | Route=maintain | Trust=Reliable | Attraction=none | Expect=None | Public/Private=warm/warm | Jealousy=none | Boundary=None | Anchors=None\n</details>\n</details>\n</internal_states>\n<!-- GFX_END -->`;
+    const imported = importLegacyState(source, { userName: 'Janko' }).state;
+    assert.deepEqual(Object.keys(imported.actors).sort(), ['RY', 'US']);
+    assert.equal(imported.actors.RY.name, 'Ryan');
+    assert.equal(imported.relations.pairs['US|RY'].b, 'RY');
+    assert.equal(imported.relations.profiles['RY->US'].from, 'RY');
+});
+
 test('relationship export uses canonical full names and the user macro instead of cached IDs', () => {
     const state = createEmptyState({ now: 1 });
     state.actors.AL = { id: 'AL', name: 'Alice Liddell' };

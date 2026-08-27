@@ -224,6 +224,8 @@ export function renderShadowParity(container, report) {
     appendLabelValue(container, 'Supported', (value.supportedRoots ?? ['ct', 'actors', 'scene']).join(', '));
     appendLabelValue(container, 'Matches', Array.isArray(value.matches) ? value.matches.length : 0);
     appendLabelValue(container, 'Divergences', Array.isArray(value.mismatches) ? value.mismatches.length : 0);
+    appendLabelValue(container, 'Candidate', value.patch?.status ?? value.patchStatus ?? value.candidateStatus ?? 'not run');
+    if (Array.isArray(value.patch?.errors) && value.patch.errors.length) appendLabelValue(container, 'Candidate errors', value.patch.errors.join('; '));
     appendLabelValue(container, 'Unsupported', (value.unsupportedDomains ?? value.unsupported ?? []).join(', ') || 'None');
     if (Array.isArray(value.mismatches)) for (const mismatch of value.mismatches.slice(0, 20)) appendLabelValue(container, mismatch.path, `${stringValue(mismatch.expected)} → ${stringValue(mismatch.actual)}`);
     return container;

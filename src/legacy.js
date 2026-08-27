@@ -149,6 +149,11 @@ function actorIdForName(state, name, userName = '') {
         if (!state.actors.US) state.actors.US = { id: 'US', name: resolvedUserName || '{{user}}' };
         return 'US';
     }
+    // Old ENDGAME ledgers displayed internal IDs in BONDS rows. NPC STATE is
+    // parsed first, so an existing two-letter label is an actor reference—not
+    // the name of a new pseudo-actor.
+    const referencedId = normalizeActorId(normalized);
+    if (isValidActorId(referencedId) && hasOwn(state.actors, referencedId)) return referencedId;
     const mapped = Object.entries(state.opaque?.legacy?.actorIds ?? {}).find(([label, id]) => String(label).toLowerCase() === normalized.toLowerCase() && isValidActorId(id));
     if (mapped && (!state.actors[mapped[1]] || String(state.actors[mapped[1]].name ?? '').toLowerCase() === normalized.toLowerCase())) {
         if (!hasOwn(state.actors, mapped[1])) state.actors[mapped[1]] = { id: mapped[1], name: normalized };

@@ -33,6 +33,8 @@ test('protocol keeps an ordinary zero-delta RP turn NORMAL', () => {
     const prompt = buildProtocolPrompt(createEmptyState({ now: 1 })).text;
     assert.match(prompt, /Ordinary RP always uses NORMAL, even when ops:\[\]/);
     assert.match(prompt, /Use OOC only for an out-of-character answer/);
+    assert.match(prompt, /valence, arousal, and dominance must each be finite numbers clamped to -2\.\.2/);
+    assert.match(prompt, /Copy actor IDs exactly from ST_STATE_PACK/);
     assert.doesNotMatch(prompt, /If no NORMAL semantic change is known, use mode OOC or FLASH/);
 });
 

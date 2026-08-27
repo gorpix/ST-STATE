@@ -150,6 +150,7 @@ export function buildProtocolPrompt(state, options = {}) {
         'Patch envelope: {"version":2,"base":"<current head>","mode":"NORMAL|OOC|FLASH","tx":"stable turn identity","ops":[...]}.',
         'NORMAL is the only state-bearing route. OOC and FLASH emit prose or handoff only: no legacy block and no ST_PATCH. If <flash_handoff .../> is present, FLASH wins.',
         'Allowed ops only: actor.set ({id,set:{name,at,location,position,doing,agenda,valence,arousal,dominance,focus,aware,fibs,circle,body}}), actor.create ({id,actor:{name,...safe fields}}), scene.set ({set:{spotlight,openBeat,timePressure,environment,positions,time}}).',
+        'Patch VAD contract: valence, arousal, and dominance must each be finite numbers clamped to -2..2, even if legacy prose/state used a wider value. Copy actor IDs exactly from ST_STATE_PACK; never derive, rename, or replace them.',
         'Do not emit arbitrary paths, unknown fields, or relationship/mechanics reducers. Always emit both the full internal-state HTML block and ST_PATCH for NORMAL.',
         'Ordinary RP always uses NORMAL, even when ops:[]; ct still advances. Use OOC only for an out-of-character answer and FLASH only when the router chooses FLASH. Never invent values. Put ST_PATCH outside and after <!-- GFX_END --> with no markdown fence.',
         `<!--ST_PATCH {"version":2,"base":${JSON.stringify(selection.meta.head)},"mode":"NORMAL","ops":[]} -->`,
