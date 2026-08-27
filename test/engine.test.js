@@ -47,6 +47,18 @@ test('legacy mode does not process controls, while shadow prompt includes handsh
     assert.equal(context.injection[2], 1);
 });
 
+test('capabilities recognize the registered generation interceptor before the first turn', () => {
+    const previous = globalThis.stStateGenerateInterceptor;
+    globalThis.stStateGenerateInterceptor = () => undefined;
+    try {
+        const adapter = new HostAdapter(() => ({ chatMetadata: {}, extensionSettings: {} }));
+        assert.equal(adapter.diagnostics().generationType, true);
+    } finally {
+        if (previous === undefined) delete globalThis.stStateGenerateInterceptor;
+        else globalThis.stStateGenerateInterceptor = previous;
+    }
+});
+
 test('shadow prompt injection waits for baseline when an existing chat has legacy state', async () => {
     const { context, engine } = setup();
     context.chatMetadata.stState = createEmptyState({ now: 1 });

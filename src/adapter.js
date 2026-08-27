@@ -115,7 +115,13 @@ export class HostAdapter {
             promptInjection: typeof context?.setExtensionPrompt === 'function',
             messageEventHooks: typeof context?.eventSource?.on === 'function' && !!(eventTypes.MESSAGE_RECEIVED || eventTypes.message_received),
             chatChangeHooks: typeof context?.eventSource?.on === 'function' && !!(eventTypes.CHAT_CHANGED || eventTypes.chat_changed),
-            generationType: !!this.lastGenerationType || typeof context?.generationType === 'string' || typeof context?.generation_type === 'string',
+            // Release SillyTavern supplies the type as the fourth argument to
+            // the manifest generation interceptor. At initialization no turn
+            // has run yet, so lastGenerationType is expected to be empty.
+            generationType: typeof globalThis.stStateGenerateInterceptor === 'function'
+                || !!this.lastGenerationType
+                || typeof context?.generationType === 'string'
+                || typeof context?.generation_type === 'string',
             saveChat: typeof context?.saveChat === 'function',
             releaseContext: !!context,
             stagingFormatterDetected: !!context?.messageFormatter,
