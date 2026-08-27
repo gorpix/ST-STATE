@@ -399,13 +399,17 @@ export function importLegacyState(input, options = {}) {
     if (worldSim) {
         state.worldSim = { raw: worldSim.raw, data: null };
         state.opaque.legacy.worldSimRaw = worldSim.raw;
+    } else if (options.baseState) {
+        const previous = migrateState(options.baseState, { now: options.now });
+        state.worldSim = deepClone(previous.worldSim);
+        state.opaque.legacy.worldSimRaw = previous.opaque?.legacy?.worldSimRaw ?? '';
     }
     if (options.requireComplete) {
         const required = [
             ['turn header', turn], ['NPC STATE', npc], ['FACTIONS', factions], ['BONDS', bonds],
             ['EMOTIONAL RESIDUE', residue], ['QUESTS', quests], ['INV & SKILLS', inventory],
             ["CHEKHOV'S GUN", chekhov], ['INTERNAL THOUGHTS', thoughts], ["GM'S NOTEBOOK", notebook],
-            ['DND TASK SIM', dnd], ['WORLD SIM', worldSim], ['SCENE & WORLD', scene],
+            ['DND TASK SIM', dnd], ['SCENE & WORLD', scene],
         ];
         const missingSections = required.filter(([, value]) => !value).map(([name]) => name);
         if (missingSections.length) {

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { importLegacyState, exportLegacyState } from '../src/legacy.js';
+import { createEmptyState } from '../src/schema.js';
 import { deepEqual } from '../src/util.js';
 
 const fixture = fs.readFileSync(new URL('./fixtures/legacy.html', import.meta.url), 'utf8');
@@ -48,5 +49,17 @@ test('explicit legacy actor IDs survive import/export without renaming', () => {
     const roundTrip = importLegacyState(exported).state;
     assert.equal(roundTrip.actors.QZ.name, 'Quill');
     assert.equal(roundTrip.relations.pairs['QZ|US'].b, 'US');
+});
+
+test('strict import accepts an omitted optional World Sim and preserves prior opaque data', () => {
+    const base = createEmptyState({ now: 1 });
+    base.worldSim = { raw: '<details><summary>🌎 WORLD SIM</summary>prior simulation</details>', data: null };
+    base.opaque.legacy.worldSimRaw = base.worldSim.raw;
+    const complete = exportLegacyState(base);
+    const withoutWorldSim = complete.replace(/<details><summary>🌎 WORLD SIM<\/summary>[\s\S]*?<\/details>\s*/i, '');
+    const imported = importLegacyState(withoutWorldSim, { now: 2, baseState: base, requireComplete: true });
+    assert.equal(imported.ok, true);
+    assert.equal(imported.state.worldSim.raw, base.worldSim.raw);
+    assert.equal(imported.state.opaque.legacy.worldSimRaw, base.opaque.legacy.worldSimRaw);
 });
 

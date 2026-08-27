@@ -268,7 +268,7 @@ export function mountSettingsUI({ host, store, getMode = () => 'LEGACY', setMode
     const diagnosticEvents = element('div', 'st-diagnostic-events');
     const parity = element('div', 'st-shadow-parity');
     const preview = element('div', 'st-import-preview'); const dashboard = element('div');
-    content.append(controls, element('h4', '', 'Capabilities'), diagnostics, element('h4', '', 'Engine diagnostics'), diagnosticEvents, element('h4', '', 'Shadow parity'), parity, element('h4', '', 'Read-only dashboard'), dashboard, preview);
+    content.append(controls, preview, element('h4', '', 'Capabilities'), diagnostics, element('h4', '', 'Engine diagnostics'), diagnosticEvents, element('h4', '', 'Shadow parity'), parity, element('h4', '', 'Read-only dashboard'), dashboard);
     details.append(content); wrapper.append(details); parent.append(wrapper);
     const refreshAll = () => {
         try {
@@ -323,8 +323,10 @@ export function mountSettingsUI({ host, store, getMode = () => 'LEGACY', setMode
             };
             if (typeof store.saveShadowCommit === 'function') await store.saveShadowCommit(imported.state, report, { expectedChatId: host?.getChatId?.() });
             else await store.save(imported.state, { expectedChatId: host?.getChatId?.() });
+            host?.notify?.('success', `Imported Shadow baseline at ct ${imported.state.ct}.`);
             refreshAll();
         } catch (error) {
+            host?.notify?.('error', `Baseline import rejected: ${sanitizePlainText(error.message)}`);
             renderImportPreview(preview, { changed: false, currentDigest: 'error', importedDigest: sanitizePlainText(error.message) }, { title: 'Baseline import rejected' });
         }
     });
