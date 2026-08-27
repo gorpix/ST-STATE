@@ -231,8 +231,14 @@ export function mountSettingsUI({ host, store, getMode = () => 'LEGACY', setMode
     const existing = parent.querySelector('#st-state-settings');
     if (existing) return existing;
     const wrapper = element('div', 'st-settings'); wrapper.id = 'st-state-settings';
-    const details = element('details', 'inline-drawer');
-    details.append(element('summary', 'inline-drawer-header', 'ST-STATE v0.3 evaluator'));
+    const details = element('div', 'inline-drawer');
+    const drawerToggle = element('div', 'inline-drawer-toggle inline-drawer-header');
+    const drawerTitle = element('b', '', 'ST-STATE v0.3 evaluator');
+    const drawerIcon = element('div', 'inline-drawer-icon fa-solid fa-circle-chevron-down down interactable');
+    drawerIcon.tabIndex = 0;
+    drawerIcon.setAttribute('role', 'button');
+    drawerToggle.append(drawerTitle, drawerIcon);
+    details.append(drawerToggle);
     const content = element('div', 'inline-drawer-content');
     const controls = element('div', 'st-controls');
     const modeLabel = element('label', 'st-mode-label', 'Chat mode');
