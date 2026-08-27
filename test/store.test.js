@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ChatStore } from '../src/store.js';
+import { checkpointAssistantSlot, createBranchLedger } from '../src/branch.js';
+import { createEmptyState } from '../src/schema.js';
 
 function makeHost() {
     const contexts = {
@@ -57,6 +59,35 @@ test('shadow sidecar keeps bounded report history and seen identities', async ()
     assert.equal(sidecar.status, 'diverged');
     assert.equal(sidecar.reports.length, 2);
     assert.deepEqual(sidecar.seen, ['message:m1', 'tx:t1', 'message:m2', 'tx:t2']);
+});
+
+test('branch state, ledger, and report persist atomically and roll back together', async () => {
+    const host = makeHost();
+    const store = new ChatStore(host, { now: () => 1 });
+    const before = createEmptyState({ now: 1 });
+    await store.save(before, { expectedChatId: 'one' });
+    const checkpoint = checkpointAssistantSlot(createBranchLedger(), { slotId: 'slot:one:1', messageId: 'slot:one:1', index: 1, swipeIndex: 0, state: before });
+    const after = structuredClone(before); after.ct = 1; after.meta.ct = 1; after.scene.openBeat = 'branch';
+    await store.saveBranchCommit(after, checkpoint.ledger, { version: 1, status: 'branch_selected', messageId: 'swipe:0' }, { expectedChatId: 'one' });
+    assert.equal(store.load().ct, 1);
+    assert.equal(store.loadBranchLedger().slots['slot:one:1'].checkpointCt, 0);
+    assert.equal(store.getShadowReport().status, 'branch_selected');
+
+    const metadataBeforeFailure = structuredClone(host.contexts.one.chatMetadata);
+    host.saveMetadata = async () => { throw new Error('offline'); };
+    after.ct = 2; after.meta.ct = 2;
+    await assert.rejects(store.saveBranchCommit(after, createBranchLedger(), { version: 1, status: 'bad' }, { expectedChatId: 'one' }), /offline/);
+    assert.deepEqual(host.contexts.one.chatMetadata, metadataBeforeFailure);
+});
+
+test('oversized full-state branch checkpoints are rejected before metadata persistence', async () => {
+    const host = makeHost();
+    const store = new ChatStore(host, { now: () => 1 });
+    const state = createEmptyState({ now: 1 });
+    state.opaque.unknownRoot.large = 'x'.repeat(1_600_000);
+    const checkpoint = checkpointAssistantSlot(createBranchLedger(), { slotId: 'slot:large', messageId: 'large', index: 1, state });
+    await assert.rejects(store.saveBranchLedger(checkpoint.ledger, { expectedChatId: 'one' }), /too large/);
+    assert.equal(host.contexts.one.chatMetadata.stStateBranches, undefined);
 });
 
 

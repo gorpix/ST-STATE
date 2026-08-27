@@ -1,6 +1,6 @@
 {
   "name": "st-state",
-  "version": "0.3.0-eval.1",
+  "version": "0.3.0-eval.2",
   "private": true,
   "type": "module",
   "description": "ST-STATE: transactional state engine for the ST-ENDGAME SillyTavern preset.",

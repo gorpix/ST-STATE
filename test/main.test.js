@@ -9,6 +9,8 @@ function resetRuntime() {
     runtimeState.engine = null;
     runtimeState.settings = null;
     runtimeState.ui = null;
+    runtimeState.bound = false;
+    runtimeState.chatTopology = [];
 }
 
 test('chat mode persistence failure restores the previous metadata configuration', async () => {

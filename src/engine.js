@@ -11,7 +11,7 @@ import { deepClone, sanitizePlainText } from './util.js';
 
 export const SKIP_GENERATION_TYPES = new Set(['quiet', 'impersonate', 'continue']);
 
-function recordControlMetadata(message, extracted, result, at) {
+export function recordControlMetadata(message, extracted, result, at) {
     if (!message || typeof message !== 'object') return;
     if (!message.extra || typeof message.extra !== 'object' || Array.isArray(message.extra)) message.extra = {};
     const record = {
@@ -42,7 +42,7 @@ function canonicalMode(adapter) {
     return requested === 'NATIVE' ? DEFAULT_ENGINE_MODE : normalizeEngineMode(requested);
 }
 
-function preserveCanonicalBookkeeping(imported, previous) {
+export function preserveCanonicalBookkeeping(imported, previous) {
     imported.history = deepClone(previous.history ?? []);
     imported.dedupe = deepClone(previous.dedupe ?? []);
     imported.branches = deepClone(previous.branches ?? imported.branches);

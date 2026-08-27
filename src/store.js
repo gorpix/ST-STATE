@@ -1,6 +1,7 @@
 import { createEmptyState, EXTENSION_KEY, migrateState } from './schema.js';
 import { makeDiff } from './reducer.js';
 import { SHADOW_SIDECAR_KEY } from './modes.js';
+import { assertBranchLedgerSize, BRANCH_SIDECAR_KEY, createBranchLedger, normalizeBranchLedger } from './branch.js';
 import { deepClone, stableHash, stableStringify } from './util.js';
 
 export class ChatSwitchError extends Error {
@@ -97,6 +98,70 @@ export class ChatStore {
     getShadowReport() {
         const metadata = this.metadata();
         return metadata[SHADOW_SIDECAR_KEY] ? deepClone(metadata[SHADOW_SIDECAR_KEY]) : null;
+    }
+
+    loadBranchLedger({ initialize = true } = {}) {
+        const metadata = this.metadata();
+        const raw = metadata[BRANCH_SIDECAR_KEY];
+        const ledger = raw ? normalizeBranchLedger(raw) : createBranchLedger();
+        if (initialize && (!raw || stableStringify(raw) !== stableStringify(ledger))) metadata[BRANCH_SIDECAR_KEY] = deepClone(ledger);
+        return deepClone(ledger);
+    }
+
+    async saveBranchLedger(ledger, { expectedChatId = undefined } = {}) {
+        const beforeId = expectedChatId === undefined ? currentChatId(this.host) : String(expectedChatId);
+        const enforceChatIdentity = expectedChatId !== undefined || beforeId !== '';
+        const metadata = this.metadata();
+        if (enforceChatIdentity && currentChatId(this.host) !== beforeId) throw new ChatSwitchError();
+        const previous = hasMetadata(metadata, BRANCH_SIDECAR_KEY) ? deepClone(metadata[BRANCH_SIDECAR_KEY]) : undefined;
+        const normalized = normalizeBranchLedger(ledger);
+        assertBranchLedgerSize(normalized);
+        metadata[BRANCH_SIDECAR_KEY] = deepClone(normalized);
+        try {
+            if (enforceChatIdentity && currentChatId(this.host) !== beforeId) throw new ChatSwitchError();
+            await this.host.saveMetadata();
+            if (enforceChatIdentity && currentChatId(this.host) !== beforeId) throw new ChatSwitchError();
+            return deepClone(normalized);
+        } catch (error) {
+            if (previous === undefined) delete metadata[BRANCH_SIDECAR_KEY];
+            else metadata[BRANCH_SIDECAR_KEY] = previous;
+            throw error;
+        }
+    }
+
+    /** Persist a branch rollback/rebaseline atomically with canonical state. */
+    async saveBranchCommit(state, ledger, report = undefined, { expectedChatId = undefined } = {}) {
+        const beforeId = expectedChatId === undefined ? currentChatId(this.host) : String(expectedChatId);
+        const enforceChatIdentity = expectedChatId !== undefined || beforeId !== '';
+        const metadata = this.metadata();
+        if (enforceChatIdentity && currentChatId(this.host) !== beforeId) throw new ChatSwitchError();
+        const previousState = hasMetadata(metadata, this.key) ? deepClone(metadata[this.key]) : undefined;
+        const previousBranches = hasMetadata(metadata, BRANCH_SIDECAR_KEY) ? deepClone(metadata[BRANCH_SIDECAR_KEY]) : undefined;
+        const previousReport = hasMetadata(metadata, SHADOW_SIDECAR_KEY) ? deepClone(metadata[SHADOW_SIDECAR_KEY]) : undefined;
+        const normalizedState = migrateState(state, { now: this.now() });
+        const normalizedBranches = normalizeBranchLedger(ledger);
+        assertBranchLedgerSize(normalizedBranches);
+        metadata[this.key] = deepClone(normalizedState);
+        metadata[BRANCH_SIDECAR_KEY] = deepClone(normalizedBranches);
+        if (report !== undefined) metadata[SHADOW_SIDECAR_KEY] = nextShadowSidecar(previousReport, report);
+        try {
+            if (enforceChatIdentity && currentChatId(this.host) !== beforeId) throw new ChatSwitchError();
+            await this.host.saveMetadata();
+            if (enforceChatIdentity && currentChatId(this.host) !== beforeId) throw new ChatSwitchError();
+            return {
+                state: deepClone(normalizedState),
+                branches: deepClone(normalizedBranches),
+                report: report === undefined ? deepClone(previousReport ?? null) : deepClone(metadata[SHADOW_SIDECAR_KEY]),
+            };
+        } catch (error) {
+            if (previousState === undefined) delete metadata[this.key];
+            else metadata[this.key] = previousState;
+            if (previousBranches === undefined) delete metadata[BRANCH_SIDECAR_KEY];
+            else metadata[BRANCH_SIDECAR_KEY] = previousBranches;
+            if (previousReport === undefined) delete metadata[SHADOW_SIDECAR_KEY];
+            else metadata[SHADOW_SIDECAR_KEY] = previousReport;
+            throw error;
+        }
     }
 
     async saveShadowReport(report, { expectedChatId = undefined } = {}) {

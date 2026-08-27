@@ -213,7 +213,29 @@ function downloadText(filename, text, type = 'application/json') {
     return true;
 }
 
-/** Mount a small settings drawer and wire backup/restore + read-only dashboard. */
+const unavailableRecoveryAction = (label) => async () => {
+    throw new Error(`${label} is unavailable in this build.`);
+};
+const defaultRebaselineSelectedBranch = unavailableRecoveryAction('Rebaseline selected branch');
+const defaultClearCurrentChatState = unavailableRecoveryAction('Clear current chat state');
+const defaultRestorePreviousState = unavailableRecoveryAction('Restore previous state');
+
+function recoveryPreviewState(state, importedLabel) {
+    const summary = stateSummary(state ?? {});
+    return {
+        changed: true,
+        currentDigest: summary.head || 'empty',
+        importedDigest: importedLabel,
+        diff: null,
+    };
+}
+
+/**
+ * Mount a small settings drawer and wire backup/restore + read-only dashboard.
+ * Recovery callbacks receive { chatId, expectedChatId, operation, selectedBranch,
+ * state, currentState, backup?, backupText? } and may return { preview,
+ * previewTitle, importedDigest, message } for the post-action UI.
+ */
 export function renderShadowParity(container, report) {
     if (!container || typeof document === 'undefined') return null;
     container.replaceChildren();
@@ -231,7 +253,7 @@ export function renderShadowParity(container, report) {
     return container;
 }
 
-export function mountSettingsUI({ host, store, getMode = () => 'LEGACY', setMode = async () => {}, getDefaultMode = () => 'LEGACY', setDefaultMode = async () => {}, getShadowReport = () => null, getDiagnosticEvents = () => [], onRefresh = () => {}, root = null } = {}) {
+export function mountSettingsUI({ host, store, getMode = () => 'LEGACY', setMode = async () => {}, getDefaultMode = () => 'LEGACY', setDefaultMode = async () => {}, getShadowReport = () => null, getDiagnosticEvents = () => [], onRefresh = () => {}, onRebaselineSelectedBranch = defaultRebaselineSelectedBranch, onClearCurrentChatState = defaultClearCurrentChatState, onRestorePreviousState = defaultRestorePreviousState, root = null } = {}) {
     if (typeof document === 'undefined' || !store) return null;
     const parent = root || document.querySelector('#extensions_settings2, #extensions_settings');
     if (!parent) return null;
@@ -269,14 +291,21 @@ export function mountSettingsUI({ host, store, getMode = () => 'LEGACY', setMode
     const backup = element('button', 'menu_button', 'Download JSON backup');
     const legacy = element('button', 'menu_button', 'Download legacy state');
     const importLatest = element('button', 'menu_button', 'Import latest chat state');
+    const rebaseline = element('button', 'menu_button', 'Rebaseline selected branch'); rebaseline.type = 'button';
+    const clearState = element('button', 'menu_button', 'Clear current chat state'); clearState.type = 'button';
+    const restorePrevious = element('button', 'menu_button', 'Restore previous state'); restorePrevious.type = 'button';
     const file = element('input'); file.type = 'file'; file.accept = '.json,.txt,.html,application/json,text/plain,text/html'; file.setAttribute('aria-label', 'Restore or import ST-STATE data');
-    controls.append(defaultModeLabel, modeLabel, refresh, backup, legacy, importLatest, file);
+    controls.append(defaultModeLabel, modeLabel, refresh, backup, legacy, importLatest, rebaseline, clearState, restorePrevious, file);
     const diagnostics = element('div', 'st-capability-diagnostics');
     const diagnosticEvents = element('div', 'st-diagnostic-events');
     const parity = element('div', 'st-shadow-parity');
-    const preview = element('div', 'st-import-preview'); const dashboard = element('div');
+    const preview = element('div', 'st-import-preview'); preview.id = 'st-state-action-preview'; preview.setAttribute('role', 'status'); preview.setAttribute('aria-live', 'polite');
+    const dashboard = element('div');
     content.append(controls, preview, element('h4', '', 'Capabilities'), diagnostics, element('h4', '', 'Engine diagnostics'), diagnosticEvents, element('h4', '', 'Shadow parity'), parity, element('h4', '', 'Read-only dashboard'), dashboard);
     details.append(content); wrapper.append(details); parent.append(wrapper);
+    const rebaselineAction = typeof onRebaselineSelectedBranch === 'function' ? onRebaselineSelectedBranch : defaultRebaselineSelectedBranch;
+    const clearStateAction = typeof onClearCurrentChatState === 'function' ? onClearCurrentChatState : defaultClearCurrentChatState;
+    const restorePreviousAction = typeof onRestorePreviousState === 'function' ? onRestorePreviousState : defaultRestorePreviousState;
     const refreshAll = () => {
         try {
             renderDiagnostics(diagnostics, host?.diagnostics?.());
@@ -337,6 +366,89 @@ export function mountSettingsUI({ host, store, getMode = () => 'LEGACY', setMode
             renderImportPreview(preview, { changed: false, currentDigest: 'error', importedDigest: sanitizePlainText(error.message) }, { title: 'Baseline import rejected' });
         }
     });
+
+    const actionContext = (state, operation, backupText = undefined, backupFilename = undefined) => ({
+        chatId: host?.getChatId?.() ?? '',
+        expectedChatId: host?.getChatId?.() ?? '',
+        operation,
+        selectedBranch: operation === 'rebaseline-selected-branch',
+        state: deepClone(state),
+        currentState: deepClone(state),
+        ...(backupText === undefined ? {} : { backup: { filename: backupFilename || 'st-state-pre-recovery-backup.json', text: backupText }, backupText }),
+    });
+
+    const runRecoveryAction = async ({ action, title, confirmation, importedLabel, filename, operation, requiresBackup = false }) => {
+        const current = store.load();
+        renderImportPreview(preview, recoveryPreviewState(current, importedLabel), { title });
+        if (action === defaultRebaselineSelectedBranch || action === defaultClearCurrentChatState || action === defaultRestorePreviousState) throw new Error(`${title.replace(/ preview$/, '')} is unavailable in this build.`);
+        if (!globalThis.confirm?.(confirmation)) return;
+        let backupText;
+        if (requiresBackup) {
+            backupText = store.recoveryBackup?.() ?? store.backup();
+            if (!downloadText(filename, backupText)) throw new Error('Could not create a recovery backup; the action was cancelled.');
+        }
+        const result = await action(actionContext(current, operation, backupText, filename));
+        const resultPreview = result?.preview ?? recoveryPreviewState(current, result?.importedDigest ?? importedLabel);
+        renderImportPreview(preview, resultPreview, { title: result?.previewTitle ?? `${title} complete` });
+        host?.notify?.('success', result?.message || `${title} complete.`);
+        refreshAll();
+        return result;
+    };
+
+    rebaseline.addEventListener('click', async () => {
+        try {
+            await runRecoveryAction({
+                action: rebaselineAction,
+                title: 'Rebaseline selected branch preview',
+                confirmation: 'Rebaseline ST-STATE from the selected branch? A recovery file will download first.',
+                importedLabel: 'selected branch',
+                filename: 'st-state-pre-rebaseline-backup.json',
+                operation: 'rebaseline-selected-branch',
+                requiresBackup: true,
+            });
+        } catch (error) {
+            host?.notify?.('error', `Rebaseline rejected: ${sanitizePlainText(error.message)}`);
+            renderImportPreview(preview, { changed: false, currentDigest: 'error', importedDigest: sanitizePlainText(error.message) }, { title: 'Rebaseline rejected' });
+            refreshAll();
+        }
+    });
+
+    clearState.addEventListener('click', async () => {
+        try {
+            await runRecoveryAction({
+                action: clearStateAction,
+                title: 'Clear current chat state preview',
+                confirmation: 'Clear ST-STATE for the current chat? A recovery file will download first.',
+                importedLabel: 'empty state',
+                filename: 'st-state-pre-clear-backup.json',
+                operation: 'clear-current-chat-state',
+                requiresBackup: true,
+            });
+        } catch (error) {
+            host?.notify?.('error', `Clear state rejected: ${sanitizePlainText(error.message)}`);
+            renderImportPreview(preview, { changed: false, currentDigest: 'error', importedDigest: sanitizePlainText(error.message) }, { title: 'Clear state rejected' });
+            refreshAll();
+        }
+    });
+
+    restorePrevious.addEventListener('click', async () => {
+        try {
+            await runRecoveryAction({
+                action: restorePreviousAction,
+                title: 'Restore previous state preview',
+                confirmation: 'Restore the previous ST-STATE snapshot for the current chat?',
+                importedLabel: 'previous state',
+                filename: 'st-state-pre-restore-backup.json',
+                operation: 'restore-previous-state',
+                requiresBackup: true,
+            });
+        } catch (error) {
+            host?.notify?.('error', `Restore previous state rejected: ${sanitizePlainText(error.message)}`);
+            renderImportPreview(preview, { changed: false, currentDigest: 'error', importedDigest: sanitizePlainText(error.message) }, { title: 'Restore previous state rejected' });
+            refreshAll();
+        }
+    });
+
     file.addEventListener('change', async () => {
         const selected = file.files?.[0]; if (!selected) return;
         const text = await selected.text();

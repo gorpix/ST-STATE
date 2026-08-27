@@ -114,6 +114,10 @@ export class HostAdapter {
             settingsPersistence: typeof context?.saveSettingsDebounced === 'function',
             promptInjection: typeof context?.setExtensionPrompt === 'function',
             messageEventHooks: typeof context?.eventSource?.on === 'function' && !!(eventTypes.MESSAGE_RECEIVED || eventTypes.message_received),
+            branchEventHooks: typeof context?.eventSource?.on === 'function'
+                && !!(eventTypes.MESSAGE_SWIPED || eventTypes.message_swiped)
+                && !!(eventTypes.MESSAGE_EDITED || eventTypes.message_edited)
+                && !!(eventTypes.MESSAGE_DELETED || eventTypes.message_deleted),
             chatChangeHooks: typeof context?.eventSource?.on === 'function' && !!(eventTypes.CHAT_CHANGED || eventTypes.chat_changed),
             // Release SillyTavern supplies the type as the fourth argument to
             // the manifest generation interceptor. At initialization no turn
