@@ -89,13 +89,35 @@ function flatten(value, prefix = '', output = {}) {
     return output;
 }
 
+function actorComparablePath(id, field) {
+    if (field === 'at' || field === 'location') return `actors.${id}.location`;
+    if (field === 'doing' || field === 'activity') return `actors.${id}.activity`;
+    return `actors.${id}.${field}`;
+}
+
+/** Return only semantic paths explicitly claimed by a candidate delta. */
+export function shadowClaimedPaths(patch) {
+    const paths = new Set(['ct']);
+    for (const operation of patch?.ops ?? []) {
+        if (operation?.op === 'actor.set') {
+            for (const field of Object.keys(operation.set ?? {})) paths.add(actorComparablePath(operation.id, field));
+        } else if (operation?.op === 'actor.create') {
+            paths.add(`actors.${operation.id}.id`);
+            for (const field of Object.keys(operation.actor ?? {})) paths.add(actorComparablePath(operation.id, field));
+        } else if (operation?.op === 'scene.set') {
+            for (const field of Object.keys(operation.set ?? {})) paths.add(`scene.${field}`);
+        }
+    }
+    return [...paths].sort();
+}
+
 /**
  * Compare a dry-run candidate with the imported legacy state. Only actor,
  * scene, and turn-counter paths are claims of this evaluator. Every other
  * domain is explicitly reported as unsupported rather than treated as a
  * parity failure.
  */
-export function compareShadowParity(authoritative, candidate, { patchStatus = 'committed', at = Date.now() } = {}) {
+export function compareShadowParity(authoritative, candidate, { patchStatus = 'committed', at = Date.now(), patch = null } = {}) {
     const expected = shadowComparable(authoritative);
     if (!candidate) {
         return {
@@ -120,7 +142,9 @@ export function compareShadowParity(authoritative, candidate, { patchStatus = 'c
     const actual = shadowComparable(candidate);
     const expectedFlat = flatten(expected);
     const actualFlat = flatten(actual);
-    const paths = [...new Set([...Object.keys(expectedFlat), ...Object.keys(actualFlat)])].sort();
+    const paths = patch
+        ? shadowClaimedPaths(patch)
+        : [...new Set([...Object.keys(expectedFlat), ...Object.keys(actualFlat)])].sort();
     const mismatches = [];
     const matches = [];
     for (const path of paths) {
@@ -137,6 +161,7 @@ export function compareShadowParity(authoritative, candidate, { patchStatus = 'c
         equal: mismatches.length === 0,
         patchStatus: String(patchStatus),
         supportedRoots: [...SHADOW_SUPPORTED_ROOTS],
+        supportedPaths: paths,
         supportedPaths: paths,
         matches,
         mismatches,

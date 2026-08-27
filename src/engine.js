@@ -221,7 +221,7 @@ export class STStateEngine {
             });
         }
         const candidate = result.status === 'committed' ? result.state : null;
-        const parity = compareShadowParity(authoritative, candidate, { patchStatus: result.status, at: this.now() });
+        const parity = compareShadowParity(authoritative, candidate, { patchStatus: result.status, at: this.now(), patch: result.patch ?? extracted.patch });
         const sidecar = makeShadowSidecar(parity, {
             transactionId: result.transactionId || (extracted.patch ? transactionIdentity(extracted.patch, identity) : ''),
             messageId: identity,

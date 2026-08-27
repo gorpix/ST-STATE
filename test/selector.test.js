@@ -37,6 +37,7 @@ test('protocol keeps an ordinary zero-delta RP turn NORMAL', () => {
     assert.match(prompt, /Copy actor IDs exactly from ST_STATE_PACK/);
     assert.match(prompt, /Patch transport is line-based, never JSON/);
     assert.match(prompt, /actor\.set\|ID\|field\|value/);
+    assert.match(prompt, /copy the value character-for-character/);
     assert.doesNotMatch(prompt, /If no NORMAL semantic change is known, use mode OOC or FLASH/);
 });
 

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createEmptyState } from '../src/schema.js';
-import { compareShadowParity, makeShadowSidecar, shadowHandshake } from '../src/shadow.js';
+import { compareShadowParity, makeShadowSidecar, shadowClaimedPaths, shadowHandshake } from '../src/shadow.js';
 
 test('shadow parity compares actor aliases, scene references, and ct only', () => {
     const authoritative = createEmptyState({ now: 1 });
@@ -34,6 +34,25 @@ test('shadow parity marks supported divergence without treating cold domains as 
     assert.equal(sidecar.transactionId, 'x');
     assert.equal(sidecar.messageId, 'm');
     assert.equal(sidecar.candidateState, undefined);
+});
+
+test('delta parity compares only candidate-claimed paths and their aliases', () => {
+    const before = createEmptyState({ now: 1 });
+    before.actors.AL = { id: 'AL', name: 'Alice', doing: 'waiting', focus: 'door' };
+    const authoritative = structuredClone(before);
+    authoritative.ct = 1;
+    authoritative.actors.AL.doing = 'opening the door';
+    authoritative.actors.AL.focus = 'hallway paraphrased by legacy';
+    const candidate = structuredClone(before);
+    candidate.ct = 1;
+    candidate.actors.AL.doing = 'opening the door';
+    const patch = { ops: [{ op: 'actor.set', id: 'AL', set: { doing: 'opening the door' } }] };
+    const paths = shadowClaimedPaths(patch);
+    assert.deepEqual(paths, ['actors.AL.activity', 'ct']);
+    const report = compareShadowParity(authoritative, candidate, { patch });
+    assert.equal(report.status, 'match');
+    assert.deepEqual(report.supportedPaths, paths);
+    assert.doesNotMatch(JSON.stringify(report), /focus/);
 });
 
 test('shadow handshake exposes the evaluator contract and exact control markers', () => {
