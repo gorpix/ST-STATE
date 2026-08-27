@@ -145,15 +145,15 @@ export function buildProtocolPrompt(state, options = {}) {
     const protocol = [
         shadowHandshake(state, { mode }),
         'ST-STATE SHADOW TRANSACTION PROTOCOL v1',
-        'Write ordinary prose first. Include the complete <internal_states> block, then append exactly one hidden HTML comment with the JSON semantic patch.',
+        'Write ordinary prose first. Include the complete <internal_states> block, then append exactly one hidden HTML comment with the line-based semantic patch.',
         'The <internal_states> block is authoritative for this turn. ST_PATCH is an evaluation candidate only; it is never authoritative and never overwrites the canonical state.',
-        'Patch envelope: {"version":2,"base":"<current head>","mode":"NORMAL|OOC|FLASH","tx":"stable turn identity","ops":[...]}.',
+        'Patch transport is line-based, never JSON. Headers: V2, base=<current head>, mode=NORMAL, tx=<short stable turn identity>. Do not use braces, commas, JSON quoting, markdown fences, or an END line.',
         'NORMAL is the only state-bearing route. OOC and FLASH emit prose or handoff only: no legacy block and no ST_PATCH. If <flash_handoff .../> is present, FLASH wins.',
-        'Allowed ops only: actor.set ({id,set:{name,at,location,position,doing,agenda,valence,arousal,dominance,focus,aware,fibs,circle,body}}), actor.create ({id,actor:{name,...safe fields}}), scene.set ({set:{spotlight,openBeat,timePressure,environment,positions,time}}).',
+        'Allowed data lines only: actor.set|ID|field|value ; actor.create|ID|field|value ; scene.set|field|value ; scene.position|ID|value. The value is the entire remainder of its one line and needs no quoting or escaping. Emit only fields changed this turn; never restate whole actor records.',
         'Patch VAD contract: valence, arousal, and dominance must each be finite numbers clamped to -2..2, even if legacy prose/state used a wider value. Copy actor IDs exactly from ST_STATE_PACK; never derive, rename, or replace them.',
         'Do not emit arbitrary paths, unknown fields, or relationship/mechanics reducers. Always emit both the full internal-state HTML block and ST_PATCH for NORMAL.',
-        'Ordinary RP always uses NORMAL, even when ops:[]; ct still advances. Use OOC only for an out-of-character answer and FLASH only when the router chooses FLASH. Never invent values. Put ST_PATCH outside and after <!-- GFX_END --> with no markdown fence.',
-        `<!--ST_PATCH {"version":2,"base":${JSON.stringify(selection.meta.head)},"mode":"NORMAL","ops":[]} -->`,
+        'Ordinary RP always uses NORMAL, even with no data lines; ct still advances. Use OOC only for an out-of-character answer and FLASH only when the router chooses FLASH. Never invent values. Put ST_PATCH outside and after <!-- GFX_END -->.',
+        `<!--ST_PATCH\nV2\nbase=${selection.meta.head}\nmode=NORMAL\ntx=turn-${selection.meta.ct + 1}\n-->`,
         formatHotStatePack(selection),
     ];
     return { text: protocol.join('\n'), selection, mode };

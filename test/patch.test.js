@@ -20,6 +20,18 @@ test('reports malformed patch but still hides its well-formed comment', () => {
     assert.equal(result.prose, 'Prose  tail');
 });
 
+test('parses line patches without JSON escaping and preserves pipes and quotes in values', () => {
+    const text = `Reply.\n<!--ST_PATCH\nV2\nbase=h-4\nmode=NORMAL\ntx=turn-5\nactor.set|AL|body|Alice said "yes" | still calm\nactor.set|AL|valence|2\nscene.set|openBeat|The sign reads "GO" | the door opens\nscene.position|AL|beside the door\n-->`;
+    const result = extractHiddenPatch(text);
+    assert.equal(result.ok, true);
+    assert.equal(result.patch.base, 'h-4');
+    assert.equal(result.patch.ops[0].set.body, 'Alice said "yes" | still calm');
+    assert.equal(result.patch.ops[0].set.valence, 2);
+    assert.equal(result.patch.ops[1].set.openBeat, 'The sign reads "GO" | the door opens');
+    assert.equal(result.patch.ops[1].set.positions.AL, 'beside the door');
+    assert.equal(result.prose, 'Reply.\n');
+});
+
 test('flash handoff freezes and is removed from display', () => {
     assert.equal(hasFlashHandoff('ordinary <flash_handoff reason="zoom"/> prose'), true);
     assert.equal(removeControlPayload('ordinary <flash_handoff reason="zoom"/> prose'), 'ordinary  prose');

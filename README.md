@@ -30,10 +30,16 @@ The entry point is plain browser ES modules; no server plugin and no bundler are
 
 ## Shadow protocol
 
-In `SHADOW`, an assistant turn includes a complete `<internal_states>` block and one hidden comment such as:
+In `SHADOW`, an assistant turn includes a complete `<internal_states>` block and one hidden line patch such as:
 
-```html
-<!--ST_PATCH {"version":2,"base":"h123","mode":"NORMAL","tx":"turn-4","ops":[{"op":"scene.set","set":{"openBeat":"The gate opens"}}]} -->
+```text
+<!--ST_PATCH
+V2
+base=h123
+mode=NORMAL
+tx=turn-4
+scene.set|openBeat|The gate opens
+-->
 ```
 
 The runtime handshake is a multiline `ST_STATE_HANDSHAKE v1` control block ending with `END_ST_STATE_HANDSHAKE`. On a `NORMAL` Shadow turn, every complete legacy block with the expected next `ct` becomes authoritative even when the candidate patch is missing, malformed, stale, or rejected. Candidate validity affects parity diagnostics only. The `ST_PATCH` candidate is dry-run against the previous head; only actor, scene, and `ct` paths are compared. Other domains are marked unsupported, never failed. `OOC`, `FLASH`, or `<flash_handoff .../>` freeze both paths. A missing legacy block or out-of-sequence `ct` leaves canonical state untouched and produces diagnostics.
