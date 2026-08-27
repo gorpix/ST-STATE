@@ -47,10 +47,15 @@ function actorCard(actor, id) {
     return card;
 }
 
+function actorDisplayName(state, id, importedLabel = '') {
+    if (id === 'US') return state.actors?.US?.name || '{{user}}';
+    return state.actors?.[id]?.name || importedLabel || id;
+}
+
 function relationCard(relation, state) {
     const card = element('article', 'st-relation-card');
-    const labelA = relation.labelA || state.actors?.[relation.a]?.name || relation.a;
-    const labelB = relation.labelB || state.actors?.[relation.b]?.name || relation.b;
+    const labelA = actorDisplayName(state, relation.a, relation.labelA);
+    const labelB = actorDisplayName(state, relation.b, relation.labelB);
     card.append(element('h4', '', `${labelA} ↔ ${labelB}`));
     const metrics = [['BOND', relation.bond, -5, 20, 'st-bond'], ['SPARKS', relation.sparks, 0, 20, 'st-sparks'], ['GRUDGE', relation.grudge, 0, 20, 'st-grudge']];
     for (const [label, value, min, max, className] of metrics) {
@@ -64,8 +69,8 @@ function relationCard(relation, state) {
     const profiles = relation.profile ? Object.values(relation.profile) : [];
     for (const profile of profiles) {
         const profileBox = element('div', 'st-profile');
-        const from = state.actors?.[profile.from]?.name || profile.from;
-        const to = state.actors?.[profile.to]?.name || profile.to;
+        const from = actorDisplayName(state, profile.from);
+        const to = actorDisplayName(state, profile.to);
         profileBox.append(element('strong', '', `Profile ${from} → ${to}`));
         for (const [key, value] of [['Type', profile.type], ['Route', profile.route], ['Trust', profile.trust], ['Attraction', profile.attraction], ['Expect', profile.expect], ['Public', profile.public], ['Private', profile.private], ['Jealousy', profile.jealousy], ['Boundary', profile.boundary], ['Anchors', profile.anchors]]) appendLabelValue(profileBox, key, stringValue(value));
         card.append(profileBox);
@@ -295,7 +300,7 @@ export function mountSettingsUI({ host, store, getMode = () => 'LEGACY', setMode
     importLatest.addEventListener('click', async () => {
         try {
             const chatText = (host?.getChat?.() ?? []).map((message) => message?.mes ?? message?.message ?? message?.content ?? '').join('\n');
-            const imported = importLegacyState(chatText, { now: Date.now(), baseState: store.load(), requireComplete: true });
+            const imported = importLegacyState(chatText, { now: Date.now(), baseState: store.load(), requireComplete: true, userName: host?.getUserName?.() });
             if (!imported.ok) throw new Error(imported.diagnostics?.join('; ') || 'No complete <internal_states> block was found');
             const current = store.load();
             const backupDocument = {
@@ -337,7 +342,7 @@ export function mountSettingsUI({ host, store, getMode = () => 'LEGACY', setMode
             let parsed;
             if (/\.json$/i.test(selected.name)) parsed = store.previewRestore(text);
             else {
-                const imported = importLegacyState(text, { now: Date.now() });
+                const imported = importLegacyState(text, { now: Date.now(), userName: host?.getUserName?.() });
                 if (!imported.ok) throw new Error(imported.diagnostics?.join('; ') || 'No complete <internal_states> block was found');
                 parsed = { changed: true, current: store.load(), imported: imported.state, currentDigest: 'current', importedDigest: 'legacy', diff: null, legacy: true };
             }

@@ -32,6 +32,11 @@ export class HostAdapter {
         return Array.isArray(chat) ? chat : [];
     }
 
+    getUserName() {
+        const context = this.context();
+        return String(context?.name1 ?? '').trim();
+    }
+
     getSettings() {
         const context = this.context();
         if (!context || typeof context.extensionSettings !== 'object' || context.extensionSettings === null) return null;

@@ -176,7 +176,7 @@ export class STStateEngine {
             return { ...result, displayText: extracted.prose, extracted };
         }
 
-        const importedResult = importLegacyState(raw, { now: this.now(), baseState: state, requireComplete: true });
+        const importedResult = importLegacyState(raw, { now: this.now(), baseState: state, requireComplete: true, userName: this.adapter?.getUserName?.() });
         if (!importedResult.ok) {
             this.diagnostics.warn('SHADOW_LEGACY_MISSING', 'Shadow mode requires a complete <internal_states> block; canonical state was kept unchanged.', { messageIndex: index });
             const result = { status: 'missing_legacy', mode: 'SHADOW', state, displayText: extracted.found ? extracted.prose : raw, extracted, persisted: false };

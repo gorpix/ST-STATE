@@ -51,6 +51,27 @@ test('explicit legacy actor IDs survive import/export without renaming', () => {
     assert.equal(roundTrip.relations.pairs['QZ|US'].b, 'US');
 });
 
+test('relationship export uses canonical full names and the user macro instead of cached IDs', () => {
+    const state = createEmptyState({ now: 1 });
+    state.actors.AL = { id: 'AL', name: 'Alice Liddell' };
+    state.relations.pairs['US|AL'] = {
+        a: 'US', b: 'AL', labelA: 'US', labelB: 'AL', bond: 4, sparks: 2, grudge: 0,
+        profile: { 'AL->US': { from: 'AL', to: 'US', type: 'friend' } },
+    };
+    const exported = exportLegacyState(state);
+    assert.match(exported, /<b>\{\{user\}\}<\/b> ↔ <b>Alice Liddell<\/b>/);
+    assert.match(exported, /Profile Alice Liddell→\{\{user\}\}/);
+    assert.doesNotMatch(exported, /<b>US<\/b> ↔ <b>AL<\/b>/);
+});
+
+test('resolved SillyTavern user name imports as US rather than a new actor', () => {
+    const source = `<!-- GFX_START -->\n<internal_states>\n<details><summary>🎬 INTERNAL STATES (Turn: 3)</summary>\n<details><summary>👥 NPC STATE</summary>\n- Alice Liddell | At: room | Doing: waiting | Agenda: None | VAD: 0/0/0 | Focus: door | Aware: room | Fibs: None | Circle: None | Body: well\n</details>\n<details><summary>💚 BONDS</summary>\n- Alice Liddell ↔ Xavier Stone | BOND: 2 | Sparks: 0 | Grudge: 0\n- Profile Alice Liddell→Xavier Stone: Type=friend | Route=maintain | Trust=Reliable | Attraction=none | Expect=None | Public/Private=warm/warm | Jealousy=none | Boundary=None | Anchors=None\n</details>\n</details>\n</internal_states>\n<!-- GFX_END -->`;
+    const imported = importLegacyState(source, { userName: 'Xavier Stone' }).state;
+    assert.equal(imported.relations.pairs['AL|US'].b, 'US');
+    assert.equal(imported.relations.profiles['AL->US'].to, 'US');
+    assert.equal(imported.actors.US.name, 'Xavier Stone');
+});
+
 test('strict import accepts an omitted optional World Sim and preserves prior opaque data', () => {
     const base = createEmptyState({ now: 1 });
     base.worldSim = { raw: '<details><summary>🌎 WORLD SIM</summary>prior simulation</details>', data: null };

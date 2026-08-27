@@ -142,9 +142,13 @@ function parseActorRow(line) {
     return actor;
 }
 
-function actorIdForName(state, name) {
+function actorIdForName(state, name, userName = '') {
     const normalized = sanitizePlainText(name, { maxLength: 200, preserveNewlines: false });
-    if (isUserLabel(normalized)) return 'US';
+    const resolvedUserName = sanitizePlainText(userName, { maxLength: 200, preserveNewlines: false });
+    if (isUserLabel(normalized) || (resolvedUserName && normalized.toLowerCase() === resolvedUserName.toLowerCase())) {
+        if (!state.actors.US) state.actors.US = { id: 'US', name: resolvedUserName || '{{user}}' };
+        return 'US';
+    }
     const mapped = Object.entries(state.opaque?.legacy?.actorIds ?? {}).find(([label, id]) => String(label).toLowerCase() === normalized.toLowerCase() && isValidActorId(id));
     if (mapped && (!state.actors[mapped[1]] || String(state.actors[mapped[1]].name ?? '').toLowerCase() === normalized.toLowerCase())) {
         if (!hasOwn(state.actors, mapped[1])) state.actors[mapped[1]] = { id: mapped[1], name: normalized };
@@ -158,6 +162,7 @@ function actorIdForName(state, name) {
 }
 
 function actorLabel(state, id) {
+    if (id === 'US') return '{{user}}';
     return state.actors[id]?.name || id;
 }
 
@@ -166,7 +171,7 @@ function parseAgenda(value) {
     return match ? { text: parseValueOrNone(match[1]), step: Number(match[2]), max: Number(match[3]) } : { text: parseValueOrNone(value), step: 0, max: 0 };
 }
 
-function parseRelationshipRows(state, content, diagnostics) {
+function parseRelationshipRows(state, content, diagnostics, userName = '') {
     for (const line of rowsFromHtml(content)) {
         const plain = removeBullet(line);
         if (/^(?:\[Only if [^\]]+\]\s*)?Profile\s+/i.test(plain)) continue;
@@ -177,8 +182,8 @@ function parseRelationshipRows(state, content, diagnostics) {
         }
         const leftLabel = sanitizePlainText(match[1], { maxLength: 200, preserveNewlines: false });
         const rightLabel = sanitizePlainText(match[2], { maxLength: 200, preserveNewlines: false });
-        const left = actorIdForName(state, leftLabel);
-        const right = actorIdForName(state, rightLabel);
+        const left = actorIdForName(state, leftLabel, userName);
+        const right = actorIdForName(state, rightLabel, userName);
         if (left === right) { diagnostics.unparsed.push(line); continue; }
         const key = relationKey(left, right);
         state.relations.pairs[key] = {
@@ -193,7 +198,7 @@ function parseRelationshipRows(state, content, diagnostics) {
     }
 }
 
-function parseProfileRows(state, content, diagnostics) {
+function parseProfileRows(state, content, diagnostics, userName = '') {
     for (const line of rowsFromHtml(content)) {
         const plain = removeBullet(line);
         const match = plain.match(/^(?:\[Only if [^\]]+\]\s*)?Profile\s+(.+?)\s*→\s*(.+?)\s*:\s*Type\s*=\s*([^|]+?)\s*\|\s*Route\s*=\s*([^|]+?)\s*\|\s*Trust\s*=\s*([^|]+?)\s*\|\s*Attraction\s*=\s*([^|]+?)\s*\|\s*Expect\s*=\s*([^|]+?)\s*\|\s*Public\/Private\s*=\s*([^\/|]+?)\s*\/\s*([^|]+?)\s*\|\s*Jealousy\s*=\s*([^|]+?)\s*\|\s*Boundary\s*=\s*([^|]+?)\s*\|\s*Anchors\s*=\s*(.*)$/i);
@@ -203,8 +208,8 @@ function parseProfileRows(state, content, diagnostics) {
         }
         const fromLabel = sanitizePlainText(match[1], { maxLength: 200, preserveNewlines: false });
         const toLabel = sanitizePlainText(match[2], { maxLength: 200, preserveNewlines: false });
-        const from = actorIdForName(state, fromLabel);
-        const to = actorIdForName(state, toLabel);
+        const from = actorIdForName(state, fromLabel, userName);
+        const to = actorIdForName(state, toLabel, userName);
         const profile = {
             from,
             to,
@@ -227,7 +232,7 @@ function parseProfileRows(state, content, diagnostics) {
     }
 }
 
-function parseActorSection(state, section, diagnostics) {
+function parseActorSection(state, section, diagnostics, userName = '') {
     for (const line of rowsFromHtml(section?.content ?? '')) {
         const actor = parseActorRow(line);
         if (!actor) {
@@ -238,7 +243,7 @@ function parseActorSection(state, section, diagnostics) {
         const existingHint = hintedId ? state.actors[hintedId] : null;
         const hintAvailable = isValidActorId(hintedId)
             && (hintedId === 'US' ? isUserLabel(actor.name) : (!existingHint || String(existingHint.name ?? '').toLowerCase() === actor.name.toLowerCase()));
-        const id = hintAvailable ? hintedId : actorIdForName(state, actor.name);
+        const id = hintAvailable ? hintedId : actorIdForName(state, actor.name, userName);
         if (isValidActorId(id) && actor.name) state.opaque.legacy.actorIds[actor.name] = id;
         const existing = state.actors[id] ?? { id, name: actor.name };
         state.actors[id] = { ...existing, ...actor, id };
@@ -327,7 +332,7 @@ function parseDndSection(state, section, diagnostics) {
     else diagnostics.unparsed.push(...lines);
 }
 
-function parseSceneSection(state, section, diagnostics) {
+function parseSceneSection(state, section, diagnostics, userName = '') {
     const lines = rowsFromHtml(section?.content ?? '');
     for (const line of lines) {
         const fields = parseLabelFields(line);
@@ -342,7 +347,7 @@ function parseSceneSection(state, section, diagnostics) {
         for (const pair of pairs) {
             const match = pair.match(/^\s*(.+?)\s*[:=]\s*(.+)$/);
             if (!match) continue;
-            const id = actorIdForName(state, match[1]);
+            const id = actorIdForName(state, match[1], userName);
             state.scene.positions[id] = parseValueOrNone(match[2]);
         }
         delete state.scene.positionsRaw;
@@ -384,9 +389,9 @@ export function importLegacyState(input, options = {}) {
     const known = new Set();
     const mark = (pattern) => { const node = directSection(outer, pattern); if (node) known.add(node); return node; };
 
-    const npcDiagnostics = { unparsed: [] }; const npc = mark(/NPC\s+STATE/i); parseActorSection(state, npc, npcDiagnostics); mergeOpaqueRaw(state, 'NPC STATE', npcDiagnostics.unparsed);
+    const npcDiagnostics = { unparsed: [] }; const npc = mark(/NPC\s+STATE/i); parseActorSection(state, npc, npcDiagnostics, options.userName); mergeOpaqueRaw(state, 'NPC STATE', npcDiagnostics.unparsed);
     const factionDiagnostics = { unparsed: [] }; const factions = mark(/FACTIONS/i); parseFactionSection(state, factions, factionDiagnostics); mergeOpaqueRaw(state, 'FACTIONS', factionDiagnostics.unparsed);
-    const bondsDiagnostics = { unparsed: [] }; const bonds = mark(/BONDS|BOND\s+TRACKER/i); if (bonds) { parseRelationshipRows(state, bonds.content, bondsDiagnostics); parseProfileRows(state, bonds.content, bondsDiagnostics); } mergeOpaqueRaw(state, 'BONDS', bondsDiagnostics.unparsed);
+    const bondsDiagnostics = { unparsed: [] }; const bonds = mark(/BONDS|BOND\s+TRACKER/i); if (bonds) { parseRelationshipRows(state, bonds.content, bondsDiagnostics, options.userName); parseProfileRows(state, bonds.content, bondsDiagnostics, options.userName); } mergeOpaqueRaw(state, 'BONDS', bondsDiagnostics.unparsed);
     const residueDiagnostics = { unparsed: [] }; const residue = mark(/EMOTIONAL\s+RESIDUE/i); parseResidueSection(state, residue, residueDiagnostics); mergeOpaqueRaw(state, 'EMOTIONAL RESIDUE', residueDiagnostics.unparsed);
     const questDiagnostics = { unparsed: [] }; const quests = mark(/QUESTS/i); parseQuestSection(state, quests, questDiagnostics); mergeOpaqueRaw(state, 'QUESTS', questDiagnostics.unparsed);
     const inventoryDiagnostics = { unparsed: [] }; const inventory = mark(/INV\s*&\s*SKILLS|INVENTORY\s*&\s*STATUS/i); parseInventorySection(state, inventory, inventoryDiagnostics); mergeOpaqueRaw(state, 'INV & SKILLS', inventoryDiagnostics.unparsed);
@@ -394,7 +399,7 @@ export function importLegacyState(input, options = {}) {
     const thoughtDiagnostics = { unparsed: [] }; const thoughts = mark(/INTERNAL\s+THOUGHTS/i); parseThoughtSection(state, thoughts, thoughtDiagnostics); mergeOpaqueRaw(state, 'INTERNAL THOUGHTS', thoughtDiagnostics.unparsed);
     const notebookDiagnostics = { unparsed: [] }; const notebook = mark(/GM'?S?\s+NOTEBOOK/i); parseNotebookSection(state, notebook, notebookDiagnostics); mergeOpaqueRaw(state, "GM'S NOTEBOOK", notebookDiagnostics.unparsed);
     const dndDiagnostics = { unparsed: [] }; const dnd = mark(/DND\s+TASK\s+SIM/i); parseDndSection(state, dnd, dndDiagnostics); mergeOpaqueRaw(state, 'DND TASK SIM', dndDiagnostics.unparsed);
-    const sceneDiagnostics = { unparsed: [] }; const scene = mark(/SCENE\s*&\s*WORLD/i); parseSceneSection(state, scene, sceneDiagnostics); mergeOpaqueRaw(state, 'SCENE & WORLD', sceneDiagnostics.unparsed);
+    const sceneDiagnostics = { unparsed: [] }; const scene = mark(/SCENE\s*&\s*WORLD/i); parseSceneSection(state, scene, sceneDiagnostics, options.userName); mergeOpaqueRaw(state, 'SCENE & WORLD', sceneDiagnostics.unparsed);
     const worldSim = mark(/WORLD\s+SIM/i);
     if (worldSim) {
         state.worldSim = { raw: worldSim.raw, data: null };
@@ -466,8 +471,10 @@ function exportDetails(title, content, extra = '') {
 function exportRelationRows(state) {
     const rows = [];
     for (const relation of Object.values(state.relations.pairs ?? {})) {
-        const left = valueOrNone(relation.labelA || actorLabel(state, relation.a));
-        const right = valueOrNone(relation.labelB || actorLabel(state, relation.b));
+        // Canonical actor records own display names. Relation labels are import
+        // hints and may still contain legacy two-letter IDs.
+        const left = valueOrNone(actorLabel(state, relation.a) || relation.labelA);
+        const right = valueOrNone(actorLabel(state, relation.b) || relation.labelB);
         rows.push(`- <b>${left}</b> ↔ <b>${right}</b> | BOND: ${relation.bond} | Sparks: ${relation.sparks} | Grudge: ${relation.grudge}`);
         const profileMap = { ...(relation.profile ?? {}) };
         for (const [profileKey, profile] of Object.entries(state.relations.profiles ?? {})) {
