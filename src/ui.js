@@ -253,7 +253,7 @@ export function renderShadowParity(container, report) {
     return container;
 }
 
-export function mountSettingsUI({ host, store, getMode = () => 'LEGACY', setMode = async () => {}, getDefaultMode = () => 'LEGACY', setDefaultMode = async () => {}, getShadowReport = () => null, getDiagnosticEvents = () => [], onRefresh = () => {}, onRebaselineSelectedBranch = defaultRebaselineSelectedBranch, onClearCurrentChatState = defaultClearCurrentChatState, onRestorePreviousState = defaultRestorePreviousState, root = null } = {}) {
+export function mountSettingsUI({ host, store, getMode = () => 'LEGACY', setMode = async () => {}, getDefaultMode = () => 'LEGACY', setDefaultMode = async () => {}, getGfxSettings = () => ({ enabled: true, durationMs: 7000 }), setGfxSettings = async () => {}, onPreviewGfx = () => {}, getShadowReport = () => null, getDiagnosticEvents = () => [], onRefresh = () => {}, onRebaselineSelectedBranch = defaultRebaselineSelectedBranch, onClearCurrentChatState = defaultClearCurrentChatState, onRestorePreviousState = defaultRestorePreviousState, root = null } = {}) {
     if (typeof document === 'undefined' || !store) return null;
     const parent = root || document.querySelector('#extensions_settings2, #extensions_settings');
     if (!parent) return null;
@@ -262,7 +262,7 @@ export function mountSettingsUI({ host, store, getMode = () => 'LEGACY', setMode
     const wrapper = element('div', 'st-settings'); wrapper.id = 'st-state-settings';
     const details = element('div', 'inline-drawer');
     const drawerToggle = element('div', 'inline-drawer-toggle inline-drawer-header');
-    const drawerTitle = element('b', '', 'ST-STATE v0.3 evaluator');
+    const drawerTitle = element('b', '', 'ST-STATE v0.4 local GFX evaluator');
     const drawerIcon = element('div', 'inline-drawer-icon fa-solid fa-circle-chevron-down down interactable');
     drawerIcon.tabIndex = 0;
     drawerIcon.setAttribute('role', 'button');
@@ -296,12 +296,27 @@ export function mountSettingsUI({ host, store, getMode = () => 'LEGACY', setMode
     const restorePrevious = element('button', 'menu_button', 'Restore previous state'); restorePrevious.type = 'button';
     const file = element('input'); file.type = 'file'; file.accept = '.json,.txt,.html,application/json,text/plain,text/html'; file.setAttribute('aria-label', 'Restore or import ST-STATE data');
     controls.append(defaultModeLabel, modeLabel, refresh, backup, legacy, importLatest, rebaseline, clearState, restorePrevious, file);
+    const gfxControls = element('div', 'st-controls st-gfx-settings-controls');
+    const gfxEnabledLabel = element('label', 'st-mode-label', 'Local pop-in GFX');
+    const gfxEnabled = element('input'); gfxEnabled.type = 'checkbox'; gfxEnabled.setAttribute('aria-label', 'Enable local pop-in graphics');
+    gfxEnabled.checked = getGfxSettings().enabled !== false;
+    gfxEnabledLabel.append(gfxEnabled);
+    const gfxDurationLabel = element('label', 'st-mode-label', 'Duration');
+    const gfxDuration = element('select'); gfxDuration.setAttribute('aria-label', 'Local pop-in duration');
+    for (const [label, value] of [['5 sec', 5000], ['7 sec', 7000], ['10 sec', 10000], ['15 sec', 15000]]) {
+        const option = element('option', '', label); option.value = String(value); gfxDuration.append(option);
+    }
+    gfxDuration.value = String(getGfxSettings().durationMs ?? 7000);
+    gfxDurationLabel.append(gfxDuration);
+    const previewIos = element('button', 'menu_button', 'Preview iPhone-like'); previewIos.type = 'button';
+    const previewAndroid = element('button', 'menu_button', 'Preview Android-like'); previewAndroid.type = 'button';
+    gfxControls.append(gfxEnabledLabel, gfxDurationLabel, previewIos, previewAndroid);
     const diagnostics = element('div', 'st-capability-diagnostics');
     const diagnosticEvents = element('div', 'st-diagnostic-events');
     const parity = element('div', 'st-shadow-parity');
     const preview = element('div', 'st-import-preview'); preview.id = 'st-state-action-preview'; preview.setAttribute('role', 'status'); preview.setAttribute('aria-live', 'polite');
     const dashboard = element('div');
-    content.append(controls, preview, element('h4', '', 'Capabilities'), diagnostics, element('h4', '', 'Engine diagnostics'), diagnosticEvents, element('h4', '', 'Shadow parity'), parity, element('h4', '', 'Read-only dashboard'), dashboard);
+    content.append(controls, element('h4', '', 'Local pop-in graphics'), gfxControls, preview, element('h4', '', 'Capabilities'), diagnostics, element('h4', '', 'Engine diagnostics'), diagnosticEvents, element('h4', '', 'Shadow parity'), parity, element('h4', '', 'Read-only dashboard'), dashboard);
     details.append(content); wrapper.append(details); parent.append(wrapper);
     const rebaselineAction = typeof onRebaselineSelectedBranch === 'function' ? onRebaselineSelectedBranch : defaultRebaselineSelectedBranch;
     const clearStateAction = typeof onClearCurrentChatState === 'function' ? onClearCurrentChatState : defaultClearCurrentChatState;
@@ -326,6 +341,20 @@ export function mountSettingsUI({ host, store, getMode = () => 'LEGACY', setMode
         catch (error) { defaultMode.value = getDefaultMode(); renderImportPreview(preview, { changed: false, currentDigest: 'error', importedDigest: sanitizePlainText(error.message) }, { title: 'Default mode change rejected' }); }
         refreshAll();
     });
+    const saveGfxSettings = async () => {
+        try { await setGfxSettings({ enabled: gfxEnabled.checked, durationMs: Number(gfxDuration.value) }); }
+        catch (error) {
+            const current = getGfxSettings();
+            gfxEnabled.checked = current.enabled !== false;
+            gfxDuration.value = String(current.durationMs ?? 7000);
+            renderImportPreview(preview, { changed: false, currentDigest: 'error', importedDigest: sanitizePlainText(error.message) }, { title: 'GFX setting rejected' });
+        }
+        refreshAll();
+    };
+    gfxEnabled.addEventListener('change', saveGfxSettings);
+    gfxDuration.addEventListener('change', saveGfxSettings);
+    previewIos.addEventListener('click', () => onPreviewGfx('ios'));
+    previewAndroid.addEventListener('click', () => onPreviewGfx('android'));
     backup.addEventListener('click', () => downloadText('st-state-backup.json', store.recoveryBackup?.() ?? store.backup()));
     legacy.addEventListener('click', () => downloadText('st-internal-states.html', exportLegacyState(store.load()), 'text/html'));
     importLatest.addEventListener('click', async () => {

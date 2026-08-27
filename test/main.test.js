@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { HostAdapter } from '../src/adapter.js';
 import { ChatStore } from '../src/store.js';
-import { runtimeState, setGlobalRuntimeMode, setRuntimeMode } from '../src/main.js';
+import { previewLocalPhoneGfx, runtimeState, setGfxRuntimeSettings, setGlobalRuntimeMode, setRuntimeMode } from '../src/main.js';
 
 function resetRuntime() {
     runtimeState.adapter = null;
@@ -9,7 +10,9 @@ function resetRuntime() {
     runtimeState.engine = null;
     runtimeState.settings = null;
     runtimeState.ui = null;
+    runtimeState.gfxOverlay = null;
     runtimeState.bound = false;
+    runtimeState.active = true;
     runtimeState.chatTopology = [];
 }
 
@@ -26,6 +29,34 @@ test('chat mode persistence failure restores the previous metadata configuration
     try {
         await assert.rejects(setRuntimeMode('SHADOW'), /offline/);
         assert.deepEqual(metadata.stStateConfig, { mode: 'LEGACY', updatedAt: 1 });
+    } finally { resetRuntime(); }
+});
+
+test('local GFX settings persist, roll back on failure, and both phone previews are available', async () => {
+    const settings = { stState: { gfxEnabled: true, gfxDurationMs: 7000 } };
+    const previews = [];
+    let saves = 0;
+    runtimeState.adapter = {
+        getSettings: () => settings,
+        saveSettingsDebounced: async () => { saves += 1; },
+    };
+    runtimeState.gfxOverlay = {
+        configure: () => {},
+        replaceBranch: (_branch, events) => previews.push(events[0]),
+    };
+    try {
+        assert.deepEqual(await setGfxRuntimeSettings({ enabled: false, durationMs: 10000 }), { enabled: false, durationMs: 10000 });
+        assert.equal(saves, 1);
+        assert.equal(settings.stState.gfxEnabled, false);
+        settings.stState.gfxEnabled = true;
+        assert.equal(previewLocalPhoneGfx('ios').platform, 'ios');
+        assert.equal(previewLocalPhoneGfx('android').platform, 'android');
+        assert.deepEqual(previews.map((event) => event.platform), ['ios', 'android']);
+
+        runtimeState.adapter.saveSettingsDebounced = async () => { throw new Error('gfx settings offline'); };
+        await assert.rejects(setGfxRuntimeSettings({ enabled: false, durationMs: 5000 }), /gfx settings offline/);
+        assert.equal(settings.stState.gfxEnabled, true);
+        assert.equal(settings.stState.gfxDurationMs, 10000);
     } finally { resetRuntime(); }
 });
 
@@ -63,4 +94,29 @@ test('shadow mode selection is rejected until an existing legacy chat has a base
         assert.equal(metadata.stStateConfig, undefined);
         assert.equal(metadata.stState, undefined);
     } finally { resetRuntime(); }
+});
+
+test('successful mode changes clear any Shadow overlay', async () => {
+    const metadata = { stStateConfig: { mode: 'SHADOW' } };
+    let clears = 0;
+    runtimeState.adapter = {
+        getMetadata: () => metadata,
+        getChat: () => [],
+        getChatId: () => 'chat',
+        saveMetadata: async () => {},
+    };
+    runtimeState.gfxOverlay = { clear: () => { clears += 1; } };
+    try {
+        assert.equal(await setRuntimeMode('LEGACY'), 'LEGACY');
+        assert.equal(clears, 1);
+    } finally { resetRuntime(); }
+});
+
+test('HostAdapter guarded chat save detects a chat switch during persistence', async () => {
+    const context = {
+        chatId: 'old-chat',
+        saveChat: async () => { context.chatId = 'new-chat'; },
+    };
+    const adapter = new HostAdapter(() => context);
+    await assert.rejects(adapter.saveChat({ expectedChatId: 'old-chat' }), /active chat changed/i);
 });

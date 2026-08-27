@@ -1,16 +1,17 @@
-# ST-STATE v0.3.0-eval.2
+# ST-STATE v0.4.0-eval.1
 
-Browser-only, third-party [SillyTavern](https://docs.sillytavern.app/for-contributors/writing-extensions/) UI extension for ST-ENDGAME's durable state ledger. It keeps canonical per-chat JSON in `chatMetadata.stState`, per-chat mode configuration in `chatMetadata.stStateConfig`, shadow parity in `chatMetadata.stStateShadow`, branch checkpoints in `chatMetadata.stStateBranches`, global preferences in `extensionSettings.stState`, and accepts the evaluative `ST_PATCH` hidden comment.
+Browser-only, third-party [SillyTavern](https://docs.sillytavern.app/for-contributors/writing-extensions/) UI extension for ST-ENDGAME's durable state ledger and local in-world artifact renderer. It keeps canonical per-chat JSON in `chatMetadata.stState`, per-chat mode configuration in `chatMetadata.stStateConfig`, shadow parity in `chatMetadata.stStateShadow`, branch checkpoints in `chatMetadata.stStateBranches`, global preferences in `extensionSettings.stState`, and accepts the evaluative `ST_PATCH` and `ST_GFX` hidden line controls.
 
-This release is an evaluative Shadow build. `LEGACY` is the default and performs no injection or message processing. `SHADOW` asks the model for both a complete `<internal_states>` block and an `ST_PATCH`; the imported legacy block remains authoritative while the patch is applied only to a disposable clone. `NATIVE` is present in the mode model but locked, and `RECOVERY` is read-only for incoming turns.
+This release is an evaluative Shadow build with presentation-only local GFX. `LEGACY` is the default and remains inert. `SHADOW` asks the model for a complete `<internal_states>` block, an `ST_PATCH`, and optional public `ST_GFX`; the imported legacy block remains authoritative while the patch is applied only to a disposable clone. `NATIVE` is present in the mode model but locked, and `RECOVERY` is read-only for incoming turns.
 
 ## Integration roadmap
 
 - ST-STATE will become the required engine shipped with ST-ENDGAME; preset and extension are being developed separately only during the near-term transition.
 - ST-FLASH will be absorbed into ST-STATE by **ST-STATE v1.0**.
 - ST-STATE and ST-FLASH will be fully integrated into ST-ENDGAME by **ST-ENDGAME v1.0**, leaving one preset distribution with its required extension.
+- TODO after the local renderer: persistent in-world phone contacts and offscreen NPC text/call threads, with unread state and branch-safe conversation history.
 
-## Scope (Evaluative 0.3)
+## Scope (Evaluative 0.4)
 
 - Release-compatible extension manifest, entry point, settings panel, diagnostics, and read-only dashboard.
 - Versioned per-chat schema, migration, backup/restore preview, and tolerant importer/exporter for the current `<internal_states>` legacy format.
@@ -18,8 +19,10 @@ This release is an evaluative Shadow build. `LEGACY` is the default and performs
 - Shadow handshake, compact hot-state pack, strict dry-run patch validation, actor/scene/ct parity diagnostics, and an isolated `stStateShadow` sidecar.
 - Per-assistant-slot checkpoints with released SillyTavern swipe/edit/delete event handling. Selecting or generating another swipe restores the common pre-response state before that branch becomes canonical.
 - Backup-gated **Rebaseline selected branch**, **Clear current chat state**, and **Restore previous state** controls. Candidate patches never enter canonical history.
+- Strict `ST_GFX V1` line parser and local text-only artifact renderer for phone, terminal, paper, map, notice, credential, transaction, web, broadcast, data, image, monitor, and media pop-ins. Phone artifacts include distinct iPhone-like and Android-like chat, notification, call, and email layouts.
+- Branch-bound GFX replay cache stored with the selected message swipe; swiping, editing, deleting, clearing, or changing chat replaces or clears abandoned overlays.
 
-Later mechanics (Bonds reducers, agendas, Chekhov, DND, clocks, knowledge, commitments, artifact rendering, and flash orchestration) are intentionally not implemented.
+Later mechanics (Bonds reducers, agendas, Chekhov, DND, clocks, knowledge, commitments, persistent artifact state, phone contact threads, and flash orchestration) are intentionally not implemented.
 
 ## Install
 
@@ -46,6 +49,12 @@ scene.set|openBeat|The gate opens
 The runtime handshake is a multiline `ST_STATE_HANDSHAKE v1` control block ending with `END_ST_STATE_HANDSHAKE`. On a `NORMAL` Shadow turn, every complete legacy block with the expected next `ct` becomes authoritative even when the candidate patch is missing, malformed, stale, or rejected. Candidate validity affects parity diagnostics only. The `ST_PATCH` candidate is dry-run against the previous head; only actor, scene, and `ct` paths are compared. Other domains are marked unsupported, never failed. `OOC`, `FLASH`, or `<flash_handoff .../>` freeze both paths. A missing legacy block or out-of-sequence `ct` leaves canonical state untouched and produces diagnostics.
 
 Each assistant message slot retains the complete state from immediately before its response. Starting a new swipe restores that checkpoint before generation, so every alternative begins from the same `ct` and head. Selecting an existing completed swipe imports its complete legacy block from that checkpoint. Edit and delete events rebaseline or roll back the affected slot instead of leaving authority on an abandoned branch.
+
+## Local GFX protocol
+
+On a NORMAL turn that visibly presents an in-world visual medium, ST-ENDGAME emits at most one hidden `ST_GFX V1` line block after state controls. ST-STATE accepts only allowlisted media, public/visible content, bounded plain-text fields, and at most 16 rows. It strips complete, malformed, or dangling controls from the selected swipe and renders accepted artifacts with DOM element creation and `textContent`; model HTML, CSS, scripts, JSON, and external assets are never interpreted.
+
+The settings drawer can enable/disable Shadow pop-ins, choose their duration, and preview the iPhone-like and Android-like phone skins in any mode. Parsed artifacts are presentation-only and never enter canonical state or Shadow parity.
 
 ## Development
 

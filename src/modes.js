@@ -41,6 +41,8 @@ export function createDefaultSettings() {
         diagnostics: true,
         defaultMode: DEFAULT_ENGINE_MODE,
         nativeLocked: NATIVE_MODE_LOCKED,
+        gfxEnabled: true,
+        gfxDurationMs: 7000,
     };
 }
 
@@ -51,6 +53,9 @@ export function ensureGlobalSettings(settings) {
     const record = settings[SETTINGS_KEY];
     if (typeof record.enabled !== 'boolean') record.enabled = true;
     if (typeof record.diagnostics !== 'boolean') record.diagnostics = true;
+    if (typeof record.gfxEnabled !== 'boolean') record.gfxEnabled = true;
+    const gfxDurationMs = Number(record.gfxDurationMs);
+    record.gfxDurationMs = Number.isFinite(gfxDurationMs) ? Math.max(2000, Math.min(20000, Math.trunc(gfxDurationMs))) : 7000;
     record.defaultMode = normalizeEngineMode(record.defaultMode);
     record.nativeLocked = NATIVE_MODE_LOCKED;
     return record;

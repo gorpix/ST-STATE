@@ -56,9 +56,18 @@ export class HostAdapter {
         return context.saveSettingsDebounced();
     }
 
-    async saveChat() {
+    async saveChat({ expectedChatId = undefined } = {}) {
+        if (expectedChatId !== undefined && String(this.getChatId()) !== String(expectedChatId)) {
+            throw new Error('The active chat changed before chat data could be saved');
+        }
         const context = this.context();
-        if (typeof context?.saveChat === 'function') return context.saveChat();
+        if (typeof context?.saveChat === 'function') {
+            const result = await context.saveChat();
+            if (expectedChatId !== undefined && String(this.getChatId()) !== String(expectedChatId)) {
+                throw new Error('The active chat changed while chat data was being saved');
+            }
+            return result;
+        }
         // Chat objects are already mutable in release ST. There is no safe
         // generic fallback that should fabricate an API call here.
         return undefined;

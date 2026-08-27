@@ -1,4 +1,4 @@
-# ST-STATE v0.3 evaluative architecture
+# ST-STATE v0.4 evaluative architecture
 
 ST-STATE is the state-engine half of ST-ENDGAME's transition to a required bundled extension. This evaluative release observes the existing `<internal_states>` contract before Native mode is unlocked.
 
@@ -16,6 +16,7 @@ The state document is versioned (`schemaVersion: 2`) and includes the legacy sec
 4. The parity comparator checks only `ct`, actor paths, and scene paths (mapping `at`/`location` and `doing`/`activity` aliases). Cold domains are listed as unsupported. The imported legacy document is persisted; the dry-run patch and its history never are.
 5. For `OOC`, `FLASH`, and flash handoff, both paths are frozen and no state/history/ct change occurs. Missing, incomplete, or out-of-sequence legacy input leaves the canonical document untouched.
 6. After persistence or a deliberate reject/ignore decision, the handler removes complete or dangling hidden control payloads from the message display. Model strings are sanitized for plain-text state and dashboard values are inserted with `textContent`.
+7. In `SHADOW`, the selected assistant swipe may contain one public `ST_GFX V1` artifact hint. The runtime binds it to the host chat, message slot, and stable swipe identity, caches only the sanitized artifact with that message, strips the hint from the selected swipe, and renders it in a transient local overlay. LEGACY and RECOVERY do not parse or write artifact controls.
 
 ## Branch lifecycle
 
@@ -23,11 +24,15 @@ The state document is versioned (`schemaVersion: 2`) and includes the legacy sec
 
 ## Modes
 
-`LEGACY` is the global default and is fully inert. `SHADOW` is the only mode that injects the handshake/hot pack and evaluates ST_PATCH. `NATIVE` is represented in the protocol model but locked and coerced to `LEGACY` by settings controls. `RECOVERY` is read-only for incoming messages; JSON backup restore is explicit and confirmation-gated. Each atomic Shadow commit stores a pre-import recovery snapshot with its isolated parity report in `stStateShadow`; candidate history never becomes canonical history.
+`LEGACY` is the global default and is fully inert. `SHADOW` is the only mode that injects the handshake/hot pack, evaluates ST_PATCH, and processes model-provided ST_GFX hints. `NATIVE` is represented in the protocol model but locked and coerced to `LEGACY` by settings controls. `RECOVERY` is read-only for incoming messages; JSON backup restore is explicit and confirmation-gated. Each atomic Shadow commit stores a pre-import recovery snapshot with its isolated parity report in `stStateShadow`; candidate history never becomes canonical history.
+
+## Local artifact boundary
+
+The model emits structured plain-text arguments, never HTML. `gfx.js` validates an allowlisted `ST_GFX V1` line protocol, caps fields and rows, rejects non-NORMAL or non-public artifacts, and creates a deterministic content identity. `main.js` adds the authoritative chat/slot/swipe binding and keeps a bounded message-local replay cache. `gfx-overlay.js` owns presentation and uses only DOM creation plus `textContent`; it has no state-store authority. Selecting another swipe replaces the overlay branch, while edit/delete/chat-change/recovery actions clear abandoned cards. CSS provides separate iPhone-like and Android-like phone shells and media-specific artifact skins without external assets.
 
 ## M2 scope boundary
 
-The implemented reducers are deliberately limited to `actor.set`, `actor.create`, and `scene.set`, with `NORMAL`, `OOC`, and `FLASH` routing. Relationship, agenda, residue, inventory, Chekhov, DND, clocks, knowledge, commitments, artifact, and full Flash mechanics are represented in the schema/import/export surface but have no M2 mutation reducers. This keeps cold state intact while making the transaction boundary testable.
+The implemented reducers are deliberately limited to `actor.set`, `actor.create`, and `scene.set`, with `NORMAL`, `OOC`, and `FLASH` routing. Relationship, agenda, residue, inventory, Chekhov, DND, clocks, knowledge, commitments, persistent artifact state, and full Flash mechanics are represented in the schema/import/export surface but have no M2 mutation reducers. Local artifact rendering is presentation-only and does not widen this mutation boundary.
 
 ## Host integration and degradation
 

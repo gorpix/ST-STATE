@@ -55,6 +55,7 @@ function setup() {
     runtimeState.settings = context.extensionSettings.stState;
     runtimeState.active = true;
     runtimeState.ui = null;
+    runtimeState.gfxOverlay = null;
     return { context, adapter, store, engine, initial };
 }
 
@@ -64,6 +65,7 @@ function resetRuntime() {
     runtimeState.engine = null;
     runtimeState.settings = null;
     runtimeState.ui = null;
+    runtimeState.gfxOverlay = null;
     runtimeState.bound = false;
 }
 
@@ -274,5 +276,19 @@ test('branch persistence failure stores a RECOVERY safety latch', async () => {
         assert.equal(failed.status, 'persistence_error');
         assert.equal(context.chatMetadata.stStateConfig.mode, 'RECOVERY');
         assert.ok((context.metadataSaves ?? 0) > 0);
+    } finally { resetRuntime(); }
+});
+
+test('missing branch checkpoints clear stale local graphics on every branch event', async () => {
+    const { context } = setup();
+    let clears = 0;
+    runtimeState.gfxOverlay = { clear: () => { clears += 1; } };
+    const message = { is_user: false, mes: 'Old untracked reply', swipe_id: 0, swipes: ['Old untracked reply'], swipe_info: [{}] };
+    context.chat.push(message);
+    try {
+        assert.equal((await handleMessageSwiped(1)).status, 'missing_checkpoint');
+        assert.equal((await handleMessageEdited(1)).status, 'missing_checkpoint');
+        assert.equal((await handleMessageSwipeDeleted({ messageId: 1, swipeId: 0 })).status, 'missing_checkpoint');
+        assert.equal(clears, 3);
     } finally { resetRuntime(); }
 });

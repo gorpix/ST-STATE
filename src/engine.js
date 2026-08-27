@@ -171,7 +171,7 @@ export class STStateEngine {
             if (extracted.controlBearing) {
                 recordControlMetadata(message, extracted, result, this.now());
                 stripMessageControlPayload(message);
-                try { await this.adapter.saveChat?.(); } catch { /* display cleanup is best effort */ }
+                try { await this.adapter.saveChat?.({ expectedChatId: targetChatId }); } catch { /* display cleanup is best effort */ }
             }
             return { ...result, displayText: extracted.prose, extracted };
         }
@@ -183,7 +183,7 @@ export class STStateEngine {
             recordControlMetadata(message, extracted, result, this.now());
             if (extracted.controlBearing) {
                 stripMessageControlPayload(message);
-                try { await this.adapter.saveChat?.(); } catch { /* rejection cleanup is best effort */ }
+                try { await this.adapter.saveChat?.({ expectedChatId: targetChatId }); } catch { /* rejection cleanup is best effort */ }
             }
             return result;
         }
@@ -204,7 +204,7 @@ export class STStateEngine {
             recordControlMetadata(message, extracted, mismatch, this.now());
             if (extracted.controlBearing) {
                 stripMessageControlPayload(message);
-                try { await this.adapter.saveChat?.(); } catch { /* rejection cleanup is best effort */ }
+                try { await this.adapter.saveChat?.({ expectedChatId: targetChatId }); } catch { /* rejection cleanup is best effort */ }
             }
             this.diagnostics.warn('SHADOW_SEQUENCE', `Legacy turn ${authoritative.ct} did not follow canonical turn ${state.ct}; canonical state was kept unchanged.`);
             return mismatch;
@@ -253,7 +253,7 @@ export class STStateEngine {
             const failure = { status: 'persistence_error', mode: 'SHADOW', state, displayText: extracted.prose, extracted, error, parity: sidecar, persisted: false };
             recordControlMetadata(message, extracted, failure, this.now());
             stripMessageControlPayload(message);
-            try { await this.adapter.saveChat?.(); } catch { /* preserve original diagnostic */ }
+            try { await this.adapter.saveChat?.({ expectedChatId: targetChatId }); } catch { /* preserve original diagnostic */ }
             return failure;
         }
 
@@ -271,7 +271,7 @@ export class STStateEngine {
         };
         recordControlMetadata(message, extracted, shadowResult, this.now());
         stripMessageControlPayload(message);
-        try { await this.adapter.saveChat?.(); } catch (error) { this.diagnostics.warn('MESSAGE_SAVE', `Control payload removed for display but chat save failed: ${error.message}`); }
+        try { await this.adapter.saveChat?.({ expectedChatId: targetChatId }); } catch (error) { this.diagnostics.warn('MESSAGE_SAVE', `Control payload removed for display but chat save failed: ${error.message}`); }
         return shadowResult;
     }
 

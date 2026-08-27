@@ -11,6 +11,8 @@ import { importLegacyState } from './legacy.js';
 import { BRANCH_SIDECAR_KEY, checkpointAssistantSlot, createBranchLedger, invalidateAssistantDelete, invalidateAssistantEdit, latestAssistantCheckpoint, prepareSwipeEvaluation, registerAssistantSwipe, stableSwipeIdentity } from './branch.js';
 import { EXTENSION_KEY } from './schema.js';
 import { SHADOW_SIDECAR_KEY } from './modes.js';
+import { extractGfxProtocol, removeGfxControl } from './gfx.js';
+import { createGfxOverlay } from './gfx-overlay.js';
 
 export const runtimeState = {
     adapter: null,
@@ -20,6 +22,7 @@ export const runtimeState = {
     active: true,
     bound: false,
     ui: null,
+    gfxOverlay: null,
     chatTopology: [],
 };
 
@@ -71,7 +74,7 @@ function branchOptions(adapter, message, index, swipeIndexOverride = undefined) 
     const slotId = branchSlotId(adapter, index);
     const swipeIndex = Number.isInteger(swipeIndexOverride) ? swipeIndexOverride : selectedSwipeIndex(message);
     const target = selectedSwipeTarget(message, swipeIndex);
-    const contentHash = stableHash(removeControlPayload(target.text));
+    const contentHash = stableHash(removeControlPayload(removeGfxControl(target.text)));
     const providerSwipeId = message?.swipe_info?.[swipeIndex]?.send_date;
     return {
         slotId,
@@ -84,6 +87,143 @@ function branchOptions(adapter, message, index, swipeIndexOverride = undefined) 
         selectedText: target.text,
         at: Date.now(),
     };
+}
+
+const GFX_CACHE_KEY = 'stStateGfx';
+const MAX_GFX_CACHE_ENTRIES = 8;
+
+function gfxOptions(adapter = runtimeState.adapter) {
+    const settings = ensureSettings(adapter) ?? {};
+    const duration = Number(settings.gfxDurationMs);
+    return {
+        enabled: settings.gfxEnabled !== false,
+        duration: Number.isFinite(duration) ? Math.max(2000, Math.min(20000, Math.trunc(duration))) : 7000,
+        maxVisible: 1,
+        reducedMotion: Boolean(globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches),
+    };
+}
+
+function ensureGfxOverlay() {
+    if (runtimeState.gfxOverlay) {
+        runtimeState.gfxOverlay.configure?.(gfxOptions());
+        return runtimeState.gfxOverlay;
+    }
+    if (typeof document === 'undefined') return null;
+    runtimeState.gfxOverlay = createGfxOverlay(gfxOptions());
+    return runtimeState.gfxOverlay;
+}
+
+function gfxCache(message, { initialize = false } = {}) {
+    if (!message || typeof message !== 'object') return null;
+    if (!message.extra || typeof message.extra !== 'object' || Array.isArray(message.extra)) {
+        if (!initialize) return null;
+        message.extra = {};
+    }
+    if (!message.extra[GFX_CACHE_KEY] || typeof message.extra[GFX_CACHE_KEY] !== 'object' || Array.isArray(message.extra[GFX_CACHE_KEY])) {
+        if (!initialize) return null;
+        message.extra[GFX_CACHE_KEY] = {};
+    }
+    return message.extra[GFX_CACHE_KEY];
+}
+
+function cacheGfxEvent(message, identity, event) {
+    const cache = gfxCache(message, { initialize: true });
+    cache[identity] = deepClone(event);
+    const keys = Object.keys(cache);
+    for (const key of keys.slice(0, Math.max(0, keys.length - MAX_GFX_CACHE_ENTRIES))) delete cache[key];
+}
+
+function setMessageText(message, value) {
+    if (Object.prototype.hasOwnProperty.call(message, 'mes')) message.mes = value;
+    else if (Object.prototype.hasOwnProperty.call(message, 'message')) message.message = value;
+    else if (Object.prototype.hasOwnProperty.call(message, 'content')) message.content = value;
+}
+
+function stripSelectedGfxControl(message, swipeIndex) {
+    setMessageText(message, removeGfxControl(messageText(message)));
+    if (Array.isArray(message?.swipes) && typeof message.swipes[swipeIndex] === 'string') {
+        message.swipes[swipeIndex] = removeGfxControl(message.swipes[swipeIndex]);
+    }
+}
+
+function sameChat(adapter, expectedChatId) {
+    return String(adapter?.getChatId?.() ?? '') === String(expectedChatId ?? '');
+}
+
+async function guardedSaveChat(adapter, expectedChatId) {
+    if (!sameChat(adapter, expectedChatId)) return false;
+    if (typeof adapter?.saveChat !== 'function') return false;
+    const capabilities = adapter.capabilities?.();
+    if (capabilities && capabilities.saveChat === false) return false;
+    await adapter.saveChat({ expectedChatId });
+    return sameChat(adapter, expectedChatId);
+}
+
+function acceptsLocalGfx(result) {
+    return result?.mode === 'SHADOW'
+        && result?.persisted === true
+        && ['shadow_match', 'shadow_not_comparable', 'shadow_diverged'].includes(result?.status);
+}
+
+/** Parse, cache, strip, and locally render the selected message's visual artifact. */
+export async function renderLocalGfx(message, index, { expectedChatId = undefined } = {}) {
+    const adapter = runtimeState.adapter;
+    if (!runtimeState.active || !adapter || runtimeState.engine?.getMode?.() !== 'SHADOW' || !isAssistantSlot(message)) return { status: 'ignored' };
+    const targetChatId = String(expectedChatId ?? adapter.getChatId?.() ?? '');
+    if (!sameChat(adapter, targetChatId)) return { status: 'chat_changed' };
+    const options = branchOptions(adapter, message, index);
+    const branchId = `${targetChatId}:${options.slotId}:${options.swipeIdentity}`;
+    const target = selectedSwipeTarget(message, options.swipeIndex);
+    const extracted = extractGfxProtocol(target.pending ? '' : target.text);
+    let event = extracted.events?.[0] ?? null;
+    const cache = gfxCache(message);
+    if (!event && cache?.[options.swipeIdentity]) event = deepClone(cache[options.swipeIdentity]);
+    if (extracted.controlBearing) {
+        if (!sameChat(adapter, targetChatId)) return { status: 'chat_changed' };
+        const rollbackText = messageText(message);
+        const rollbackSwipes = Array.isArray(message.swipes) ? message.swipes.slice() : null;
+        const hadExtra = Object.prototype.hasOwnProperty.call(message, 'extra');
+        const rollbackExtra = hadExtra && message.extra && typeof message.extra === 'object'
+            ? deepClone(message.extra) : null;
+        stripSelectedGfxControl(message, options.swipeIndex);
+        if (event) cacheGfxEvent(message, options.swipeIdentity, event);
+        // ST-STATE's engine persists its own cleanup before this presentation
+        // hook runs. Persist the additional ST_GFX removal and cache now, or a
+        // chat reload can resurrect the model control and render it again.
+        let saved = false;
+        try { saved = await guardedSaveChat(adapter, targetChatId); } catch (error) {
+            runtimeState.engine?.diagnostics?.warn?.('GFX_SAVE', `Local GFX cleanup could not be persisted: ${error.message}`);
+        }
+        if (!saved) {
+            setMessageText(message, rollbackText);
+            if (rollbackSwipes) message.swipes = rollbackSwipes;
+            if (hadExtra) message.extra = rollbackExtra;
+            else if (message.extra && typeof message.extra === 'object') delete message.extra[GFX_CACHE_KEY];
+            runtimeState.gfxOverlay?.clear?.();
+            return { status: 'persistence_error', event: null, branchId };
+        }
+    }
+    if (extracted.found && !extracted.ok) {
+        runtimeState.engine?.diagnostics?.warn?.('GFX_MALFORMED', `Local GFX hint was rejected: ${(extracted.errors ?? []).join('; ')}`);
+    }
+    if (!sameChat(adapter, targetChatId)) {
+        runtimeState.gfxOverlay?.clear?.();
+        return { status: 'chat_changed' };
+    }
+    const overlay = ensureGfxOverlay();
+    if (!overlay) return { status: event ? 'unavailable' : 'empty', event, branchId };
+    if (!event) {
+        overlay.replaceBranch?.(branchId, []);
+        return { status: extracted.found ? 'rejected' : 'empty', event: null, branchId };
+    }
+    const rendered = {
+        ...deepClone(event),
+        id: `${options.swipeIdentity}:${event.id}`,
+        branchId,
+        visibility: 'public',
+    };
+    overlay.replaceBranch?.(branchId, [rendered]);
+    return { status: 'rendered', event: rendered, branchId };
 }
 
 function topologyEntry(message) {
@@ -173,11 +313,13 @@ export async function handleMessageReceived(data) {
             engine.diagnostics?.warn?.('BRANCH_SELECT', `Could not record the selected swipe: ${error.message}`);
         }
     }
-    if (attachedIdentity && result.status === 'missing') {
-        try { await adapter.saveChat(); } catch { /* message identity is a best-effort branch aid */ }
+    if (attachedIdentity && result.status === 'missing' && sameChat(adapter, chatId)) {
+        try { await guardedSaveChat(adapter, chatId); } catch { /* message identity is a best-effort branch aid */ }
     }
     runtimeState.chatTopology = snapshotChatTopology(adapter);
     refreshUI();
+    if (acceptsLocalGfx(result) && sameChat(adapter, chatId)) await renderLocalGfx(message, index, { expectedChatId: chatId });
+    else runtimeState.gfxOverlay?.clear?.();
     return result;
 }
 
@@ -201,22 +343,25 @@ function recoverOldCheckpoint(store) {
     try { return store.parseBackup(backup).state; } catch { return null; }
 }
 
-async function cleanBranchControl(message, status, adapter) {
+async function cleanBranchControl(message, status, adapter, expectedChatId) {
+    if (!sameChat(adapter, expectedChatId)) return false;
     const extracted = extractHiddenPatch(messageText(message));
-    if (!extracted.controlBearing) return;
+    if (!extracted.controlBearing) return true;
     recordControlMetadata(message, extracted, { status, mode: 'SHADOW' }, Date.now());
     stripMessageControlPayload(message);
-    try { await adapter.saveChat?.(); } catch { /* metadata authority is already safe */ }
+    try { return await guardedSaveChat(adapter, expectedChatId); }
+    catch { return false; /* metadata authority is already safe */ }
 }
 
-async function persistBranchCommit(state, ledger, report, { adapter, store, engine }) {
-    const targetChatId = String(adapter.getChatId?.() ?? '');
+async function persistBranchCommit(state, ledger, report, { adapter, store, engine, expectedChatId = undefined }) {
+    const targetChatId = String(expectedChatId ?? adapter.getChatId?.() ?? '');
     try {
         await store.saveBranchCommit(state, ledger, report, { expectedChatId: targetChatId });
         return true;
     } catch (error) {
         engine.diagnostics?.error?.('BRANCH_PERSISTENCE', `Branch state was not persisted: ${error.message}`);
         adapter.clearPrompt?.();
+        runtimeState.gfxOverlay?.clear?.();
         let recoveryPersisted = false;
         if (String(adapter.getChatId?.() ?? '') === targetChatId) {
             try {
@@ -240,6 +385,8 @@ export async function handleMessageSwiped(data) {
     const store = runtimeState.store;
     const engine = runtimeState.engine;
     if (!runtimeState.active || !adapter || !store || !engine || engine.getMode?.() !== 'SHADOW') return { status: 'ignored' };
+    const chatId = String(adapter.getChatId?.() ?? '');
+    runtimeState.gfxOverlay?.clear?.();
     const index = eventMessageIndex(data);
     const message = adapter.getChat?.()?.[index];
     if (!isAssistantSlot(message)) return { status: 'ignored' };
@@ -280,12 +427,13 @@ export async function handleMessageSwiped(data) {
             ? { status: canonical === checkpointState ? 'sequence_mismatch' : 'accepted', ct: imported.state.ct, expectedCt: checkpointState.ct + 1 }
             : { status: 'pending_or_frozen', ct: checkpointState.ct },
     });
-    const persisted = await persistBranchCommit(canonical, selected.ledger, report, { adapter, store, engine });
+    const persisted = await persistBranchCommit(canonical, selected.ledger, report, { adapter, store, engine, expectedChatId: chatId });
     if (!persisted) return { status: 'persistence_error', state: store.load(), checkpoint: checkpointState, imported: false, swipeIndex: options.swipeIndex };
-    if (!options.pendingSwipe) await cleanBranchControl(message, status, adapter);
+    if (!options.pendingSwipe) await cleanBranchControl(message, status, adapter, chatId);
     engine.diagnostics?.info?.('BRANCH_SELECTED', status === 'branch_selected'
         ? `Selected swipe ${options.swipeIndex + 1} is canonical at ct ${canonical.ct}.`
         : `Restored pre-response state at ct ${canonical.ct} for swipe ${options.swipeIndex + 1}.`);
+    if (status === 'branch_selected' && sameChat(adapter, chatId)) await renderLocalGfx(message, index, { expectedChatId: chatId });
     refreshUI();
     runtimeState.chatTopology = snapshotChatTopology(adapter);
     return { status, state: canonical, checkpoint: checkpointState, imported: imported.ok, swipeIndex: options.swipeIndex };
@@ -296,6 +444,8 @@ export async function handleMessageEdited(data) {
     const store = runtimeState.store;
     const engine = runtimeState.engine;
     if (!runtimeState.active || !adapter || !store || !engine || engine.getMode?.() !== 'SHADOW') return { status: 'ignored' };
+    const chatId = String(adapter.getChatId?.() ?? '');
+    runtimeState.gfxOverlay?.clear?.();
     const index = eventMessageIndex(data);
     const message = adapter.getChat?.()?.[index];
     if (!message || typeof message !== 'object') return { status: 'ignored' };
@@ -308,8 +458,9 @@ export async function handleMessageEdited(data) {
             const result = invalidateAssistantEdit(ledger, { slotId: slot.slotId, messageId: slot.messageId, index: slot.index, at: Date.now(), reason: 'earlier_user_message_edited' });
             ledger = result.ledger;
         }
-        const persisted = await persistBranchCommit(restoreState, ledger, branchReport('user_edit_rollback', restoreState, { source: 'user-message-edit', previous: store.load() }), { adapter, store, engine });
+        const persisted = await persistBranchCommit(restoreState, ledger, branchReport('user_edit_rollback', restoreState, { source: 'user-message-edit', previous: store.load() }), { adapter, store, engine, expectedChatId: chatId });
         runtimeState.chatTopology = snapshotChatTopology(adapter);
+        runtimeState.gfxOverlay?.clear?.();
         if (persisted) adapter.notify?.('warning', 'ST-STATE rolled back responses after the edited user message. Regenerate from that point.');
         refreshUI();
         return { status: persisted ? 'user_edit_rollback' : 'persistence_error', state: persisted ? restoreState : store.load() };
@@ -323,9 +474,10 @@ export async function handleMessageEdited(data) {
         : invalidated.restoreState;
     const status = canonical === invalidated.restoreState ? 'edit_rollback' : 'edit_rebaseline';
     const replacement = checkpointAssistantSlot(invalidated.ledger, { ...options, state: invalidated.restoreState, replace: true });
-    const persisted = await persistBranchCommit(canonical, replacement.ledger, branchReport(status, canonical, { ...options, previous: invalidated.restoreState, source: status }), { adapter, store, engine });
+    const persisted = await persistBranchCommit(canonical, replacement.ledger, branchReport(status, canonical, { ...options, previous: invalidated.restoreState, source: status }), { adapter, store, engine, expectedChatId: chatId });
     if (!persisted) return { status: 'persistence_error', state: store.load() };
-    await cleanBranchControl(message, status, adapter);
+    await cleanBranchControl(message, status, adapter, chatId);
+    if (status === 'edit_rebaseline' && sameChat(adapter, chatId)) await renderLocalGfx(message, index, { expectedChatId: chatId });
     runtimeState.chatTopology = snapshotChatTopology(adapter);
     refreshUI();
     return { status, state: canonical };
@@ -336,6 +488,8 @@ export async function handleMessageDeleted(data) {
     const store = runtimeState.store;
     const engine = runtimeState.engine;
     if (!runtimeState.active || !adapter || !store || !engine || engine.getMode?.() !== 'SHADOW') return { status: 'ignored' };
+    const chatId = String(adapter.getChatId?.() ?? '');
+    runtimeState.gfxOverlay?.clear?.();
     const currentTopology = snapshotChatTopology(adapter);
     const firstDeletedIndex = detectDeletedIndex(runtimeState.chatTopology, currentTopology, eventMessageIndex(data));
     let ledger = store.loadBranchLedger({ initialize: false });
@@ -346,8 +500,9 @@ export async function handleMessageDeleted(data) {
         const result = invalidateAssistantDelete(ledger, { slotId: slot.slotId, messageId: slot.messageId, index: slot.index, at: Date.now() });
         ledger = result.ledger;
     }
-    const persisted = await persistBranchCommit(restoreState, ledger, branchReport('delete_rollback', restoreState, { source: 'message-delete', previous: store.load() }), { adapter, store, engine });
+    const persisted = await persistBranchCommit(restoreState, ledger, branchReport('delete_rollback', restoreState, { source: 'message-delete', previous: store.load() }), { adapter, store, engine, expectedChatId: chatId });
     runtimeState.chatTopology = currentTopology;
+    runtimeState.gfxOverlay?.clear?.();
     if (!persisted) return { status: 'persistence_error', state: store.load() };
     refreshUI();
     return { status: 'delete_rollback', state: restoreState };
@@ -358,6 +513,8 @@ export async function handleMessageSwipeDeleted(data) {
     const store = runtimeState.store;
     const engine = runtimeState.engine;
     if (!runtimeState.active || !adapter || !store || !engine || engine.getMode?.() !== 'SHADOW') return { status: 'ignored' };
+    const chatId = String(adapter.getChatId?.() ?? '');
+    runtimeState.gfxOverlay?.clear?.();
     const index = eventMessageIndex(data);
     const message = adapter.getChat?.()?.[index];
     const options = branchOptions(adapter, message, index);
@@ -370,7 +527,7 @@ export async function handleMessageSwipeDeleted(data) {
         rebuilt = registerAssistantSwipe(rebuilt.ledger, branchOptions(adapter, message, index, swipeIndex));
     }
     const selected = prepareSwipeEvaluation(rebuilt.ledger, options);
-    try { await store.saveBranchLedger(selected.ok ? selected.ledger : rebuilt.ledger, { expectedChatId: adapter.getChatId?.() }); }
+    try { await store.saveBranchLedger(selected.ok ? selected.ledger : rebuilt.ledger, { expectedChatId: chatId }); }
     catch (error) {
         engine.diagnostics?.error?.('BRANCH_PERSISTENCE', `Swipe deletion was not persisted: ${error.message}`);
         adapter.notify?.('error', 'ST-STATE could not update the deleted swipe ledger. Rebaseline the selected branch.');
@@ -391,6 +548,7 @@ function bindEvents() {
         adapter.on(eventName(adapter, 'MESSAGE_SWIPE_DELETED'), handleMessageSwipeDeleted);
         adapter.on(eventName(adapter, 'CHAT_CHANGED'), () => {
             adapter.clearPrompt();
+            runtimeState.gfxOverlay?.clear?.();
             runtimeState.chatTopology = snapshotChatTopology(adapter);
             refreshUI();
         });
@@ -409,6 +567,9 @@ function mountUI() {
         setMode: async (mode) => setRuntimeMode(mode),
         getDefaultMode: () => getGlobalDefaultMode(runtimeState.adapter?.getSettings?.()),
         setDefaultMode: async (mode) => setGlobalRuntimeMode(mode),
+        getGfxSettings: () => ({ enabled: gfxOptions().enabled, durationMs: gfxOptions().duration }),
+        setGfxSettings: async (values) => setGfxRuntimeSettings(values),
+        onPreviewGfx: (platform) => previewLocalPhoneGfx(platform),
         getShadowReport: () => runtimeState.store?.getShadowReport?.(),
         getDiagnosticEvents: () => runtimeState.engine?.diagnostics?.list?.() ?? [],
         onRefresh: refreshUI,
@@ -427,6 +588,7 @@ function mountUI() {
         settingsRoot.append(runtimeState.ui.dashboard);
         renderReadOnlyDashboard(runtimeState.ui.dashboard, runtimeState.store.load());
     }
+    ensureGfxOverlay();
 }
 
 export async function rebaselineSelectedBranch({ expectedChatId = undefined } = {}) {
@@ -442,6 +604,7 @@ export async function rebaselineSelectedBranch({ expectedChatId = undefined } = 
     const ledger = createBranchLedger();
     const report = branchReport('manual_branch_rebaseline', canonical, { source: 'selected-branch-legacy', legacy: { status: 'baseline', ct: canonical.ct } });
     await store.saveBranchCommit(canonical, ledger, report, { expectedChatId: chatId });
+    runtimeState.gfxOverlay?.clear?.();
     runtimeState.chatTopology = snapshotChatTopology(adapter);
     return { importedDigest: imported.digest ?? canonical.head, message: `Selected branch rebaselined at ct ${canonical.ct}.` };
 }
@@ -472,6 +635,7 @@ export async function clearCurrentChatState({ expectedChatId = undefined } = {})
         throw error;
     }
     adapter.clearPrompt?.();
+    runtimeState.gfxOverlay?.clear?.();
     runtimeState.chatTopology = snapshotChatTopology(adapter);
     return { importedDigest: 'GENESIS', message: 'Current chat state cleared. Chat mode returned to LEGACY.' };
 }
@@ -487,6 +651,7 @@ export async function restorePreviousState({ expectedChatId = undefined } = {}) 
     if (!state) throw new Error('No previous state snapshot is available');
     const report = branchReport('manual_previous_restore', state, { source: 'branch-checkpoint', previous: store.load() });
     await store.saveBranchCommit(state, previous.ledger ?? ledger, report, { expectedChatId: chatId });
+    runtimeState.gfxOverlay?.clear?.();
     return { importedDigest: state.head, message: `Previous state restored at ct ${state.ct}.` };
 }
 
@@ -530,6 +695,7 @@ export async function setRuntimeMode(mode) {
         runtimeState.engine?.diagnostics?.warn('MODE_SAVE', `Could not persist chat mode: ${error.message}`);
         throw error;
     }
+    runtimeState.gfxOverlay?.clear?.();
     refreshUI();
     return selected;
 }
@@ -554,8 +720,51 @@ export async function setGlobalRuntimeMode(mode) {
         runtimeState.engine?.diagnostics?.warn('SETTINGS_SAVE', `Could not persist global default mode: ${error.message}`);
         throw error;
     }
+    runtimeState.gfxOverlay?.clear?.();
     refreshUI();
     return selected;
+}
+
+export async function setGfxRuntimeSettings({ enabled = true, durationMs = 7000 } = {}) {
+    const adapter = runtimeState.adapter ?? new HostAdapter();
+    if (!runtimeState.adapter) runtimeState.adapter = adapter;
+    const rootSettings = adapter.getSettings?.();
+    const record = ensureSettings(adapter);
+    if (!rootSettings || !record) throw new Error('Extension settings are unavailable');
+    const previous = deepClone(record);
+    record.gfxEnabled = enabled !== false;
+    const duration = Number(durationMs);
+    record.gfxDurationMs = Number.isFinite(duration) ? Math.max(2000, Math.min(20000, Math.trunc(duration))) : 7000;
+    try { await adapter.saveSettingsDebounced?.(); }
+    catch (error) {
+        Object.assign(record, previous);
+        runtimeState.engine?.diagnostics?.warn?.('GFX_SETTINGS_SAVE', `Could not persist local GFX settings: ${error.message}`);
+        throw error;
+    }
+    ensureGfxOverlay()?.configure?.(gfxOptions(adapter));
+    return { enabled: record.gfxEnabled, durationMs: record.gfxDurationMs };
+}
+
+export function previewLocalPhoneGfx(platform = 'ios') {
+    const selected = String(platform).toLowerCase() === 'android' ? 'android' : 'ios';
+    const overlay = ensureGfxOverlay();
+    if (!overlay) return null;
+    const event = {
+        id: `preview-${selected}-${Date.now()}`,
+        kind: 'phone',
+        platform: selected,
+        layout: 'chat',
+        visibility: 'public',
+        title: selected === 'ios' ? 'Messages' : 'Chat',
+        source: selected === 'ios' ? 'Mara' : 'Niko',
+        meta: { time: '09:41', battery: selected === 'ios' ? '5G  87%' : 'LTE  82%' },
+        rows: [
+            { role: 'received', label: selected === 'ios' ? 'Mara' : 'Niko', time: '09:40', text: 'You seeing this?' },
+            { role: 'sent', label: '{{user}}', time: '09:41', text: 'Yeah. Keep the line open.' },
+        ],
+    };
+    overlay.replaceBranch?.(`preview:${selected}:${Date.now()}`, [event]);
+    return event;
 }
 
 export async function stStateGenerateInterceptor(chat, _contextSize, _abort, type = 'normal') {
@@ -589,9 +798,11 @@ export async function onUpdate() {
 export function onEnable() {
     runtimeState.active = true;
     if (!runtimeState.engine) initialize();
+    ensureGfxOverlay();
 }
 export function onDisable() {
     runtimeState.active = false;
     runtimeState.adapter?.clearPrompt();
+    runtimeState.gfxOverlay?.clear?.();
 }
 
