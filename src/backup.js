@@ -18,9 +18,9 @@ export function stringifyBackup(state, options = {}) {
 
 export function parseJsonBackup(input, { now = Date.now() } = {}) {
     const value = typeof input === 'string' ? JSON.parse(input) : input;
-    if (!value || typeof value !== 'object') throw new Error('FF5 backup must be a JSON object');
-    const rawState = value.state ?? value.ff5Engine ?? value;
-    if (!rawState || typeof rawState !== 'object') throw new Error('FF5 backup has no state object');
+    if (!value || typeof value !== 'object') throw new Error('ST-STATE backup must be a JSON object');
+    const rawState = value.state ?? value.stState ?? value;
+    if (!rawState || typeof rawState !== 'object') throw new Error('ST-STATE backup has no state object');
     return {
         extension: value.extension ?? EXTENSION_KEY,
         backupVersion: value.backupVersion ?? 0,

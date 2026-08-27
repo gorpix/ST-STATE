@@ -1,9 +1,10 @@
 import { createEmptyState, EXTENSION_KEY, migrateState } from './schema.js';
 import { makeDiff } from './reducer.js';
+import { SHADOW_SIDECAR_KEY } from './modes.js';
 import { deepClone, stableHash, stableStringify } from './util.js';
 
 export class ChatSwitchError extends Error {
-    constructor(message = 'The active chat changed while FF5 was writing state') {
+    constructor(message = 'The active chat changed while ST-STATE was writing state') {
         super(message);
         this.name = 'ChatSwitchError';
     }
@@ -12,6 +13,36 @@ export class ChatSwitchError extends Error {
 function currentChatId(host) {
     const value = host?.getChatId?.();
     return value === undefined || value === null ? '' : String(value);
+}
+
+const MAX_SHADOW_REPORTS = 25;
+const MAX_SHADOW_IDENTITIES = 100;
+
+function compactShadowReport(report) {
+    if (!report || typeof report !== 'object') return null;
+    const compact = {};
+    for (const key of ['version', 'status', 'mode', 'at', 'transactionId', 'messageId', 'candidateStatus', 'previous', 'legacy', 'patch', 'canonical']) {
+        if (report[key] !== undefined) compact[key] = deepClone(report[key]);
+    }
+    return compact;
+}
+
+function nextShadowSidecar(previous, report) {
+    const priorReports = Array.isArray(previous?.reports)
+        ? previous.reports.map(compactShadowReport).filter(Boolean)
+        : (previous ? [compactShadowReport(previous)].filter(Boolean) : []);
+    const latest = compactShadowReport(report);
+    const reports = [...priorReports, latest].filter(Boolean).slice(-MAX_SHADOW_REPORTS);
+    const identities = [
+        ...(Array.isArray(previous?.seen) ? previous.seen : []),
+        report?.messageId ? `message:${report.messageId}` : '',
+        report?.transactionId ? `tx:${report.transactionId}` : '',
+    ].filter(Boolean);
+    return {
+        ...deepClone(report),
+        reports,
+        seen: [...new Set(identities)].slice(-MAX_SHADOW_IDENTITIES),
+    };
 }
 
 export class ChatStore {
@@ -63,6 +94,66 @@ export class ChatStore {
         }
     }
 
+    getShadowReport() {
+        const metadata = this.metadata();
+        return metadata[SHADOW_SIDECAR_KEY] ? deepClone(metadata[SHADOW_SIDECAR_KEY]) : null;
+    }
+
+    async saveShadowReport(report, { expectedChatId = undefined } = {}) {
+        const beforeId = expectedChatId === undefined ? currentChatId(this.host) : String(expectedChatId);
+        const enforceChatIdentity = expectedChatId !== undefined || beforeId !== '';
+        const metadata = this.metadata();
+        if (enforceChatIdentity && currentChatId(this.host) !== beforeId) throw new ChatSwitchError();
+        const previous = hasMetadata(metadata, SHADOW_SIDECAR_KEY) ? deepClone(metadata[SHADOW_SIDECAR_KEY]) : undefined;
+        const stored = nextShadowSidecar(previous, report);
+        metadata[SHADOW_SIDECAR_KEY] = stored;
+        try {
+            if (enforceChatIdentity && currentChatId(this.host) !== beforeId) throw new ChatSwitchError();
+            await this.host.saveMetadata();
+            if (enforceChatIdentity && currentChatId(this.host) !== beforeId) throw new ChatSwitchError();
+            return deepClone(stored);
+        } catch (error) {
+            if (previous === undefined) delete metadata[SHADOW_SIDECAR_KEY];
+            else metadata[SHADOW_SIDECAR_KEY] = previous;
+            throw error;
+        }
+    }
+
+    /** Persist the authoritative legacy import and its evaluator report together. */
+    async saveShadowCommit(state, report, { expectedChatId = undefined } = {}) {
+        const beforeId = expectedChatId === undefined ? currentChatId(this.host) : String(expectedChatId);
+        const enforceChatIdentity = expectedChatId !== undefined || beforeId !== '';
+        const metadata = this.metadata();
+        if (enforceChatIdentity && currentChatId(this.host) !== beforeId) throw new ChatSwitchError();
+        const previousState = hasMetadata(metadata, this.key) ? deepClone(metadata[this.key]) : undefined;
+        const previousReport = hasMetadata(metadata, SHADOW_SIDECAR_KEY) ? deepClone(metadata[SHADOW_SIDECAR_KEY]) : undefined;
+        const normalized = migrateState(state, { now: this.now() });
+        metadata[this.key] = deepClone(normalized);
+        const storedReport = nextShadowSidecar(previousReport, report);
+        metadata[SHADOW_SIDECAR_KEY] = storedReport;
+        try {
+            if (enforceChatIdentity && currentChatId(this.host) !== beforeId) throw new ChatSwitchError();
+            await this.host.saveMetadata();
+            if (enforceChatIdentity && currentChatId(this.host) !== beforeId) throw new ChatSwitchError();
+            return { state: deepClone(normalized), report: deepClone(storedReport) };
+        } catch (error) {
+            if (previousState === undefined) delete metadata[this.key];
+            else metadata[this.key] = previousState;
+            if (previousReport === undefined) delete metadata[SHADOW_SIDECAR_KEY];
+            else metadata[SHADOW_SIDECAR_KEY] = previousReport;
+            throw error;
+        }
+    }
+
+    clearShadowReport() {
+        const metadata = this.metadata();
+        delete metadata[SHADOW_SIDECAR_KEY];
+    }
+
+    recoveryBackup(options = {}) {
+        return this.backup(options);
+    }
+
     backup({ state = undefined, includeChatId = true } = {}) {
         const document = {
             extension: EXTENSION_KEY,
@@ -78,11 +169,11 @@ export class ChatStore {
     parseBackup(input) {
         let value = input;
         if (typeof value === 'string') {
-            try { value = JSON.parse(value); } catch (error) { throw new Error(`Invalid FF5 backup JSON: ${error.message}`); }
+            try { value = JSON.parse(value); } catch (error) { throw new Error(`Invalid ST-STATE backup JSON: ${error.message}`); }
         }
-        if (!value || typeof value !== 'object') throw new Error('FF5 backup must be a JSON object');
-        const rawState = value.state ?? value.ff5Engine ?? value;
-        if (!rawState || typeof rawState !== 'object') throw new Error('FF5 backup has no state object');
+        if (!value || typeof value !== 'object') throw new Error('ST-STATE backup must be a JSON object');
+        const rawState = value.state ?? value.stState ?? value;
+        if (!rawState || typeof rawState !== 'object') throw new Error('ST-STATE backup has no state object');
         return { extension: value.extension ?? EXTENSION_KEY, backupVersion: value.backupVersion ?? 0, chatId: value.chatId ?? '', state: migrateState(rawState, { now: this.now() }) };
     }
 

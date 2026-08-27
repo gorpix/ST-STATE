@@ -2,71 +2,136 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { HostAdapter } from '../src/adapter.js';
 import { ChatStore } from '../src/store.js';
-import { FF5Engine } from '../src/engine.js';
+import { STStateEngine } from '../src/engine.js';
+import { exportLegacyState } from '../src/legacy.js';
+import { applyTransaction } from '../src/reducer.js';
+import { setChatMode } from '../src/modes.js';
 import { createEmptyState } from '../src/schema.js';
 
 function setup() {
     const context = { chatId: 'chat', chatMetadata: {}, chat: [], extensionSettings: {}, setExtensionPrompt: (...args) => { context.injection = args; }, saveMetadata: async () => {}, saveChat: async () => {} };
     const adapter = new HostAdapter(() => context);
     const store = new ChatStore(adapter, { now: () => 5 });
-    const engine = new FF5Engine({ adapter, store, now: () => 5 });
-    const state = createEmptyState({ now: 1 }); state.actors = { US: { id: 'US', name: 'User' }, AL: { id: 'AL', name: 'Alice' } }; context.chatMetadata.ff5Engine = state;
+    const engine = new STStateEngine({ adapter, store, now: () => 5 });
+    const state = createEmptyState({ now: 1 }); state.actors = { US: { id: 'US', name: 'User' }, AL: { id: 'AL', name: 'Alice' } }; context.chatMetadata.stState = state; context.extensionSettings.stState = { defaultMode: 'SHADOW', enabled: true, diagnostics: true }; setChatMode(context.chatMetadata, 'SHADOW', { now: 1 });
     return { context, adapter, store, engine };
 }
 
-test('engine commits one valid message, removes hidden comment only after persistence, and rejects missing patch safely', async () => {
+test('shadow imports authoritative legacy state and records matching candidate parity', async () => {
     const { context, engine, store } = setup();
-    const message = { is_user: false, mes: `Alice speaks <!--FF5_PATCH {"version":2,"base":"GENESIS","mode":"NORMAL","tx":"t","ops":[{"op":"scene.set","set":{"openBeat":"door"}}]} -->` };
+    const authoritative = createEmptyState({ now: 5 }); authoritative.actors = { US: { id: 'US', name: 'User' }, AL: { id: 'AL', name: 'Alice' } }; authoritative.ct = 1; authoritative.meta.ct = 1; authoritative.scene.openBeat = 'door';
+    const message = { is_user: false, mes: `Alice speaks ${exportLegacyState(authoritative)} <!--ST_PATCH {"version":2,"base":"GENESIS","mode":"NORMAL","tx":"t","ops":[{"op":"scene.set","set":{"openBeat":"door"}}]} -->` };
     const result = await engine.processAssistantMessage(message, { index: 0, messageIdentity: 'm' });
-    assert.equal(result.status, 'committed');
-    assert.equal(message.mes, 'Alice speaks ');
+    assert.equal(result.status, 'shadow_match');
+    assert.equal(message.mes, `Alice speaks ${exportLegacyState(authoritative)} `);
     assert.equal(store.load().ct, 1);
-    assert.equal(message.extra.ff5Engine.status, 'committed');
-    assert.equal(message.extra.ff5Engine.patch.tx, 't');
-    const missing = await engine.processAssistantMessage({ is_user: false, mes: 'ordinary prose' }, { index: 1, messageIdentity: 'm2' });
-    assert.equal(missing.status, 'missing');
-    assert.equal(store.load().ct, 1);
-    assert.ok(context.chatMetadata.ff5Engine.history.length === 1);
+    assert.equal(message.extra.stState.status, 'shadow_match');
+    assert.equal(message.extra.stState.patch.tx, 't');
+    assert.equal(context.chatMetadata.stStateShadow.status, 'match');
 });
 
-test('engine flash handoff overrides attempted NORMAL and prompt injection is compact', async () => {
+test('legacy mode does not process controls, while shadow prompt includes handshake and pack', async () => {
     const { engine, context, store } = setup();
-    const message = { is_user: false, mes: `flash <flash_handoff reason="local"/> <!--FF5_PATCH {"version":2,"base":"GENESIS","mode":"NORMAL","ops":[{"op":"scene.set","set":{"openBeat":"bad"}}]} -->` };
+    setChatMode(context.chatMetadata, 'LEGACY');
+    const message = { is_user: false, mes: 'ordinary <!--ST_PATCH {"version":2,"base":"GENESIS","mode":"NORMAL","ops":[]} -->' };
     const result = await engine.processAssistantMessage(message, { index: 0, messageIdentity: 'm' });
-    assert.equal(result.status, 'ignored');
+    assert.equal(result.status, 'legacy');
     assert.equal(store.load().ct, 0);
-    assert.equal(message.mes, 'flash  ');
+    assert.match(message.mes, /ST_PATCH/);
+    setChatMode(context.chatMetadata, 'SHADOW');
     const injected = await engine.injectPrompt('normal', { userText: 'Alice' });
     assert.equal(injected.injected, true);
-    assert.match(context.injection[1], /FF5_STATE_PACK/);
-    assert.equal(context.injection[0], 'ff5Engine.hotState');
+    assert.match(context.injection[1], /ST_STATE_HANDSHAKE v1/);
+    assert.match(context.injection[1], /ST_STATE_PACK/);
+    assert.equal(context.injection[0], 'stState.hotState');
     assert.equal(context.injection[2], 1);
+});
+
+test('shadow prompt injection waits for baseline when an existing chat has legacy state', async () => {
+    const { context, engine } = setup();
+    context.chatMetadata.stState = createEmptyState({ now: 1 });
+    context.chat = [{ is_user: false, mes: exportLegacyState(createEmptyState({ now: 1 })) }];
+    const result = await engine.injectPrompt('normal');
+    assert.equal(result.injected, false);
+    assert.equal(result.reason, 'baseline_required');
+    assert.equal(context.injection[1], '');
+});
+
+test('OOC and FLASH remain frozen in shadow mode', async () => {
+    const { engine, store } = setup();
+    const before = store.load();
+    for (const patchMode of ['OOC', 'FLASH']) {
+        const message = { is_user: false, mes: `prose ${exportLegacyState({ ...before, ct: before.ct + 1 })} <!--ST_PATCH ${JSON.stringify({ version: 2, base: before.head, mode: patchMode, ops: [] })} -->` };
+        const result = await engine.processAssistantMessage(message, { index: 0, messageIdentity: `freeze-${patchMode}` });
+        assert.equal(result.status, 'ignored');
+        assert.equal(store.load().ct, before.ct);
+    }
 });
 
 test('persistence failure rolls canonical metadata back while hiding the control comment', async () => {
     const { context, engine, store } = setup();
     const before = store.load();
     context.saveMetadata = async () => { throw new Error('offline'); };
-    const message = { is_user: false, mes: `prose <!--FF5_PATCH ${JSON.stringify({ version: 2, base: before.head, mode: 'NORMAL', tx: 'offline', ops: [{ op: 'scene.set', set: { openBeat: 'must not persist' } }] })} -->` };
+    const authoritative = createEmptyState({ now: 5 }); authoritative.actors = before.actors; authoritative.ct = 1; authoritative.meta.ct = 1; authoritative.scene.openBeat = 'must not persist';
+    const message = { is_user: false, mes: `prose ${exportLegacyState(authoritative)} <!--ST_PATCH ${JSON.stringify({ version: 2, base: before.head, mode: 'NORMAL', tx: 'offline', ops: [{ op: 'scene.set', set: { openBeat: 'must not persist' } }] })} -->` };
     const result = await engine.processAssistantMessage(message, { index: 0, messageIdentity: 'offline-message' });
     assert.equal(result.status, 'persistence_error');
     assert.equal(store.load().ct, before.ct);
     assert.equal(store.load().scene.openBeat, before.scene.openBeat);
-    assert.equal(message.mes, 'prose ');
-    assert.equal(message.extra.ff5Engine.status, 'persistence_error');
-    assert.equal(message.extra.ff5Engine.patch.tx, 'offline');
+    assert.match(message.mes, /^prose /);
+    assert.doesNotMatch(message.mes, /ST_PATCH/);
+    assert.equal(message.extra.stState.status, 'persistence_error');
+    assert.equal(message.extra.stState.patch.tx, 'offline');
+    assert.equal(context.chatMetadata.stStateShadow, undefined);
 });
 
-test('fifty sequential valid NORMAL turns produce fifty commits with no loss', async () => {
-    const { engine, store } = setup();
-    for (let index = 0; index < 50; index += 1) {
-        const current = store.load();
-        const message = { is_user: false, mes: `turn ${index} <!--FF5_PATCH ${JSON.stringify({ version: 2, base: current.head, mode: 'NORMAL', tx: `t-${index}`, ops: [{ op: 'scene.set', set: { openBeat: `beat-${index}` } }] })} -->` };
-        const result = await engine.processAssistantMessage(message, { index, messageIdentity: `message-${index}` });
-        assert.equal(result.status, 'committed');
+test('complete legacy remains authoritative when the candidate is missing, malformed, or stale', async () => {
+    for (const candidate of [
+        '',
+        '<!--ST_PATCH {not-json} -->',
+        '<!--ST_PATCH {"version":2,"base":"wrong-head","mode":"NORMAL","tx":"stale","ops":[]} -->',
+    ]) {
+        const { context, engine, store } = setup();
+        const authoritative = createEmptyState({ now: 5 });
+        authoritative.actors = store.load().actors;
+        authoritative.ct = 1; authoritative.meta.ct = 1; authoritative.scene.openBeat = 'authoritative';
+        const message = { is_user: false, mes: `prose ${exportLegacyState(authoritative)} ${candidate}` };
+        const result = await engine.processAssistantMessage(message, { index: 0, messageIdentity: `candidate-${candidate.length}` });
+        assert.equal(result.status, 'shadow_not_comparable');
+        assert.equal(store.load().ct, 1);
+        assert.equal(store.load().scene.openBeat, 'authoritative');
+        assert.equal(result.candidate, null);
+        assert.equal(result.parity.status, 'not_comparable');
+        assert.deepEqual(result.parity.mismatches, []);
+        assert.doesNotMatch(message.mes, /ST_PATCH/);
+        assert.equal(context.chatMetadata.stStateShadow.canonical.persisted, true);
     }
-    assert.equal(store.load().ct, 50);
-    assert.equal(store.load().history.length, 50);
-    assert.equal(store.load().scene.openBeat, 'beat-49');
+});
+
+test('missing or incomplete legacy never changes canonical and all patch controls are stripped', async () => {
+    for (const legacy of [
+        '',
+        '<internal_states><details><summary>🎬 INTERNAL STATES (Turn: 1)</summary><details><summary>👥 NPC STATE</summary>- None</details></details></internal_states>',
+    ]) {
+        const { engine, store } = setup();
+        const before = store.load();
+        const message = { is_user: false, mes: `prose ${legacy} <!--ST_PATCH {"version":2,"base":"GENESIS","mode":"NORMAL","tx":"reject","ops":[]} -->` };
+        const result = await engine.processAssistantMessage(message, { index: 0, messageIdentity: `missing-${legacy.length}` });
+        assert.equal(result.status, 'missing_legacy');
+        assert.equal(store.load().ct, before.ct);
+        assert.equal(store.load().head, before.head);
+        assert.doesNotMatch(message.mes, /ST_PATCH/);
+    }
+});
+
+test('replayed or out-of-order legacy turn cannot regress canonical state', async () => {
+    const { engine, store } = setup();
+    const first = createEmptyState({ now: 5 }); first.actors = store.load().actors; first.ct = 1; first.meta.ct = 1; first.scene.openBeat = 'first';
+    await engine.processAssistantMessage({ is_user: false, mes: exportLegacyState(first) }, { index: 0, messageIdentity: 'first' });
+    const replay = createEmptyState({ now: 6 }); replay.actors = first.actors; replay.ct = 1; replay.meta.ct = 1; replay.scene.openBeat = 'replay';
+    const result = await engine.processAssistantMessage({ is_user: false, mes: exportLegacyState(replay) }, { index: 1, messageIdentity: 'replay' });
+    assert.equal(result.status, 'legacy_sequence_mismatch');
+    assert.equal(store.load().ct, 1);
+    assert.equal(store.load().scene.openBeat, 'first');
 });
 

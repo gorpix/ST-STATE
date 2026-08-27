@@ -17,5 +17,5 @@ walk(root);
 for (const file of files) execFileSync(node, ['--check', file], { stdio: 'inherit' });
 const source = files.map((file) => fs.readFileSync(file, 'utf8')).join('\n');
 if (/messageFormatter\s*\.addHook|<script\s+src=|express\s*\(/i.test(source)) throw new Error('Forbidden staging/server integration detected');
-console.log(`FF5 lint check passed (${files.length} files).`);
+console.log(`ST-STATE lint check passed (${files.length} files).`);
 

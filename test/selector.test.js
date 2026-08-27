@@ -24,7 +24,7 @@ test('hot selector includes exact mentions, spotlight/on-screen actors, and dire
     assert.deepEqual(selected.selectedRelationKeys.sort(), ['AL|BO', 'BO|CA'].sort());
     assert.ok(selected.coldActorIds.includes('CA'));
     const pack = buildHotStatePack(state, { userText: 'Alice asks about the lantern.' });
-    assert.match(pack, /FF5_STATE_PACK v2/);
+    assert.match(pack, /ST_STATE_PACK v2/);
     assert.match(pack, /ACTOR/);
     assert.doesNotMatch(pack, /Carol/);
 });

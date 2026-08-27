@@ -1,6 +1,6 @@
 import { EXTENSION_KEY } from './schema.js';
 
-export const PROMPT_KEY = 'ff5Engine.hotState';
+export const PROMPT_KEY = 'stState.hotState';
 
 function defaultContextResolver() {
     return globalThis.SillyTavern?.getContext?.() ?? null;
@@ -93,8 +93,8 @@ export class HostAdapter {
     notify(level, message) {
         const toast = globalThis.toastr?.[level];
         if (typeof toast === 'function') toast(String(message));
-        else if (level === 'error') console.error(`[FF5] ${message}`);
-        else console.warn(`[FF5] ${message}`);
+        else if (level === 'error') console.error(`[ST-STATE] ${message}`);
+        else console.warn(`[ST-STATE] ${message}`);
     }
 
     diagnostics() {

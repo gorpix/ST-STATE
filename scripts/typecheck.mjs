@@ -13,5 +13,5 @@ function walk(directory) {
 }
 walk(root);
 for (const file of modules) await import(pathToFileURL(file));
-console.log(`FF5 module typecheck/import check passed (${modules.length} modules).`);
+console.log(`ST-STATE module typecheck/import check passed (${modules.length} modules).`);
 

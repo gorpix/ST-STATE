@@ -4,11 +4,11 @@
   "js": "index.js",
   "css": "style.css",
   "author": "gorpix",
-  "version": "0.2.0",
+  "version": "0.3.0-eval.1",
   "homePage": "https://github.com/gorpix/ST-STATE",
   "auto_update": false,
   "minimum_client_version": "1.16.0",
-  "generate_interceptor": "ff5EngineGenerateInterceptor",
+  "generate_interceptor": "stStateGenerateInterceptor",
   "hooks": {
     "activate": "onActivate",
     "install": "onInstall",

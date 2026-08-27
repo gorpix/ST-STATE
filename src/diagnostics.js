@@ -11,7 +11,7 @@ export class DiagnosticLog {
         const entry = {
             at: this.now(),
             level: String(level || 'info'),
-            code: String(code || 'FF5'),
+            code: String(code || 'ST-STATE'),
             message: sanitizePlainText(message, { maxLength: 1000, preserveNewlines: false }),
         };
         if (details !== undefined) entry.details = deepClone(details);

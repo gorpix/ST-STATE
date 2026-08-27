@@ -1,0 +1,56 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createEmptyState } from '../src/schema.js';
+import { compareShadowParity, makeShadowSidecar, shadowHandshake } from '../src/shadow.js';
+
+test('shadow parity compares actor aliases, scene references, and ct only', () => {
+    const authoritative = createEmptyState({ now: 1 });
+    authoritative.ct = 4; authoritative.meta.ct = 4;
+    authoritative.actors = { AL: { id: 'AL', name: 'Alice', at: 'lantern room', doing: 'guarding' } };
+    authoritative.scene = { spotlight: ['Alice'], openBeat: 'wait', timePressure: 'rain', environment: 'wet brass', positions: { AL: 'lantern room' }, time: '' };
+    const candidate = createEmptyState({ now: 2 });
+    candidate.ct = 4; candidate.meta.ct = 4;
+    candidate.actors = { AL: { id: 'AL', name: 'Alice', location: 'lantern room', activity: 'guarding' } };
+    candidate.scene = { spotlight: ['AL'], openBeat: 'wait', timePressure: 'rain', environment: 'wet brass', positions: { AL: 'lantern room' }, time: '' };
+    candidate.factions = { Guild: { goal: 'changed cold domain' } };
+    const report = compareShadowParity(authoritative, candidate);
+    assert.equal(report.status, 'match');
+    assert.deepEqual(report.mismatches, []);
+    assert.ok(report.unsupportedDomains.includes('factions'));
+});
+
+test('shadow parity marks supported divergence without treating cold domains as failures', () => {
+    const authoritative = createEmptyState({ now: 1 });
+    authoritative.ct = 4; authoritative.meta.ct = 4; authoritative.scene.openBeat = 'old';
+    const candidate = createEmptyState({ now: 2 });
+    candidate.ct = 5; candidate.meta.ct = 5; candidate.scene.openBeat = 'new';
+    const report = compareShadowParity(authoritative, candidate, { patchStatus: 'stale' });
+    assert.equal(report.status, 'diverged');
+    assert.equal(report.patchStatus, 'stale');
+    assert.ok(report.mismatches.some((item) => item.path === 'ct'));
+    assert.ok(report.mismatches.some((item) => item.path === 'scene.openBeat'));
+    assert.equal(report.unsupported.length > 0, true);
+    const sidecar = makeShadowSidecar(report, { transactionId: 'x', messageId: 'm' });
+    assert.equal(sidecar.transactionId, 'x');
+    assert.equal(sidecar.messageId, 'm');
+    assert.equal(sidecar.candidateState, undefined);
+});
+
+test('shadow handshake exposes the evaluator contract and exact control markers', () => {
+    const state = createEmptyState({ now: 1 });
+    const text = shadowHandshake(state);
+    assert.equal(text, [
+        'ST_STATE_HANDSHAKE v1',
+        'contract=3',
+        'schema=2',
+        'mode=SHADOW',
+        'preset=ST-ENDGAME',
+        'legacy=internal_states',
+        'patch=ST_PATCH',
+        'flash=flash_handoff',
+        'stateCt=0',
+        'stateHead=GENESIS',
+        'features=actor,scene',
+        'END_ST_STATE_HANDSHAKE',
+    ].join('\n'));
+});

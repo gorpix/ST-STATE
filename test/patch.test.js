@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { extractHiddenPatch, removeControlPayload, hasFlashHandoff } from '../src/patch.js';
 
 test('extracts hidden patch while preserving prose and removes only control payload', () => {
-    const text = 'A reply.\n<!--FF5_PATCH {"version":2,"base":"h","mode":"OOC","ops":[]} -->\nEnd.';
+    const text = 'A reply.\n<!--ST_PATCH {"version":2,"base":"h","mode":"OOC","ops":[]} -->\nEnd.';
     const result = extractHiddenPatch(text);
     assert.equal(result.ok, true);
     assert.equal(result.patch.mode, 'OOC');
@@ -12,7 +12,7 @@ test('extracts hidden patch while preserving prose and removes only control payl
 });
 
 test('reports malformed patch but still hides its well-formed comment', () => {
-    const text = 'Prose <!--FF5_PATCH {not json} --> tail';
+    const text = 'Prose <!--ST_PATCH {not json} --> tail';
     const result = extractHiddenPatch(text);
     assert.equal(result.found, true);
     assert.equal(result.ok, false);
@@ -23,6 +23,14 @@ test('reports malformed patch but still hides its well-formed comment', () => {
 test('flash handoff freezes and is removed from display', () => {
     assert.equal(hasFlashHandoff('ordinary <flash_handoff reason="zoom"/> prose'), true);
     assert.equal(removeControlPayload('ordinary <flash_handoff reason="zoom"/> prose'), 'ordinary  prose');
+});
+
+test('dangling patch comment is treated as control payload and removed to end of message', () => {
+    const source = 'visible prose <!-- ST_PATCH {"version":2';
+    const extracted = extractHiddenPatch(source);
+    assert.equal(extracted.found, false);
+    assert.equal(extracted.controlBearing, true);
+    assert.equal(extracted.prose, 'visible prose ');
 });
 
 

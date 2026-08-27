@@ -20,5 +20,5 @@ function walk(directory) {
     }
 }
 walk(root);
-console.log(`FF5 extension build check passed (${sourceFiles.length} JavaScript modules; plain ES modules, no bundle).`);
+console.log(`ST-STATE extension build check passed (${sourceFiles.length} JavaScript modules; plain ES modules, no bundle).`);
 

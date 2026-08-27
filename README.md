@@ -1,6 +1,8 @@
-# ST-STATE v0.2
+# ST-STATE v0.3.0-eval.1
 
-Browser-only, third-party [SillyTavern](https://docs.sillytavern.app/for-contributors/writing-extensions/) UI extension for ST-ENDGAME's durable state ledger. It keeps canonical per-chat JSON in `chatMetadata.ff5Engine`, global preferences in `extensionSettings.ff5Engine`, and accepts ordinary assistant prose followed by a hidden `FF5_PATCH` HTML comment. Legacy `ff5Engine` and `FF5_PATCH` identifiers remain for preset/state compatibility.
+Browser-only, third-party [SillyTavern](https://docs.sillytavern.app/for-contributors/writing-extensions/) UI extension for ST-ENDGAME's durable state ledger. It keeps canonical per-chat JSON in `chatMetadata.stState`, per-chat mode configuration in `chatMetadata.stStateConfig`, shadow parity in `chatMetadata.stStateShadow`, global preferences in `extensionSettings.stState`, and accepts the evaluative `ST_PATCH` hidden comment.
+
+This release is an evaluative Shadow build. `LEGACY` is the default and performs no injection or message processing. `SHADOW` asks the model for both a complete `<internal_states>` block and an `ST_PATCH`; the imported legacy block remains authoritative while the patch is applied only to a disposable clone. `NATIVE` is present in the mode model but locked, and `RECOVERY` is read-only for incoming turns.
 
 ## Integration roadmap
 
@@ -8,13 +10,13 @@ Browser-only, third-party [SillyTavern](https://docs.sillytavern.app/for-contrib
 - ST-FLASH will be absorbed into ST-STATE by **ST-STATE v1.0**.
 - ST-STATE and ST-FLASH will be fully integrated into ST-ENDGAME by **ST-ENDGAME v1.0**, leaving one preset distribution with its required extension.
 
-## Scope (Milestones 0–2)
+## Scope (Evaluative 0.3)
 
 - Release-compatible extension manifest, entry point, settings panel, diagnostics, and read-only dashboard.
 - Versioned per-chat schema, migration, backup/restore preview, and tolerant importer/exporter for the current `<internal_states>` legacy format.
-- Compact hot-state prompt pack containing `meta`, `scene`, selected actors, and direct relations.
-- Strict, atomic M2 patch transactions for `actor.set`, `actor.create`, `scene.set`, and `NORMAL`/`OOC`/`FLASH` routing.
-- Commit history with forward/inverse diffs and concise summaries.
+- Explicit `LEGACY`, `SHADOW`, `NATIVE`, and `RECOVERY` modes with global default and per-chat override.
+- Shadow handshake, compact hot-state pack, strict dry-run patch validation, actor/scene/ct parity diagnostics, and an isolated `stStateShadow` sidecar.
+- Canonical import backups and recovery/read-only controls. Candidate patches never enter canonical history.
 
 Later mechanics (Bonds reducers, agendas, Chekhov, DND, clocks, knowledge, commitments, artifact rendering, and flash orchestration) are intentionally not implemented.
 
@@ -26,15 +28,15 @@ Later mechanics (Bonds reducers, agendas, Chekhov, DND, clocks, knowledge, commi
 
 The entry point is plain browser ES modules; no server plugin and no bundler are required. The manifest uses only released APIs: `SillyTavern.getContext()`, fresh `chatMetadata`, `saveMetadata()`, `extensionSettings`, `saveSettingsDebounced()`, `setExtensionPrompt()`, `MESSAGE_RECEIVED`, `CHAT_CHANGED`, and generation interceptors.
 
-## Protocol
+## Shadow protocol
 
-An assistant state-changing turn ends with one hidden comment such as:
+In `SHADOW`, an assistant turn includes a complete `<internal_states>` block and one hidden comment such as:
 
 ```html
-<!--FF5_PATCH {"version":2,"base":"h123","mode":"NORMAL","tx":"turn-4","ops":[{"op":"scene.set","set":{"openBeat":"The gate opens"}}]} -->
+<!--ST_PATCH {"version":2,"base":"h123","mode":"NORMAL","tx":"turn-4","ops":[{"op":"scene.set","set":{"openBeat":"The gate opens"}}]} -->
 ```
 
-Only the allowlisted M2 operations are accepted. The extension validates the complete transaction before applying anything. `base` must equal the current `head`; a duplicate transaction/message identity is ignored. A successful `NORMAL` commit increments `ct` exactly once and writes a new `head`. `OOC`, `FLASH`, or a response containing `<flash_handoff .../>` never mutates canonical state or history. Missing/invalid patches leave canonical state untouched and produce a non-intrusive diagnostic.
+The runtime handshake is a multiline `ST_STATE_HANDSHAKE v1` control block ending with `END_ST_STATE_HANDSHAKE`. On a `NORMAL` Shadow turn, every complete legacy block with the expected next `ct` becomes authoritative even when the candidate patch is missing, malformed, stale, or rejected. Candidate validity affects parity diagnostics only. The `ST_PATCH` candidate is dry-run against the previous head; only actor, scene, and `ct` paths are compared. Other domains are marked unsupported, never failed. `OOC`, `FLASH`, or `<flash_handoff .../>` freeze both paths. A missing legacy block or out-of-sequence `ct` leaves canonical state untouched and produces diagnostics.
 
 ## Development
 

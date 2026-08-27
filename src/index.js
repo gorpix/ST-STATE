@@ -12,4 +12,6 @@ export * from './backup.js';
 export * from './diagnostics.js';
 export * from './engine.js';
 export * from './ui.js';
+export * from './modes.js';
+export * from './shadow.js';
 

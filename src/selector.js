@@ -1,5 +1,6 @@
 import { isValidActorId } from './identity.js';
 import { sanitizePlainText } from './util.js';
+import { shadowHandshake } from './shadow.js';
 
 function escapeRegex(value) {
     return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -130,27 +131,31 @@ function compactJson(value) {
 }
 
 export function formatHotStatePack(selection) {
-    const lines = ['FF5_STATE_PACK v2', `META ${compactJson(selection.meta)}`, `SCENE ${compactJson(selection.scene)}`];
+    const lines = ['ST_STATE_PACK v2', `META ${compactJson(selection.meta)}`, `SCENE ${compactJson(selection.scene)}`];
     for (const actor of Object.values(selection.actors ?? {})) lines.push(`ACTOR ${compactJson(actor)}`);
     for (const relation of selection.relations ?? []) lines.push(`RELATION ${compactJson(relation)}`);
-    lines.push('END_FF5_STATE_PACK');
+    lines.push('END_ST_STATE_PACK');
     return lines.join('\n');
 }
 
 export function buildProtocolPrompt(state, options = {}) {
     const selection = selectHotState(state, options);
+    const mode = String(options.mode ?? 'SHADOW').trim().toUpperCase();
+    if (mode !== 'SHADOW') return { text: shadowHandshake(state, { mode }), selection, mode };
     const protocol = [
-        'FF5 TRANSACTION PROTOCOL v2',
-        'Write ordinary prose first. After the prose append exactly one hidden HTML comment with the JSON semantic patch.',
+        shadowHandshake(state, { mode }),
+        'ST-STATE SHADOW TRANSACTION PROTOCOL v1',
+        'Write ordinary prose first. Include the complete <internal_states> block, then append exactly one hidden HTML comment with the JSON semantic patch.',
+        'The <internal_states> block is authoritative for this turn. ST_PATCH is an evaluation candidate only; it is never authoritative and never overwrites the canonical state.',
         'Patch envelope: {"version":2,"base":"<current head>","mode":"NORMAL|OOC|FLASH","tx":"stable turn identity","ops":[...]}.',
-        'NORMAL is the only mutating mode. OOC and FLASH must use ops:[] and never change state. If <flash_handoff .../> is present, FLASH wins.',
+        'NORMAL is the only state-bearing route. OOC and FLASH emit prose or handoff only: no legacy block and no ST_PATCH. If <flash_handoff .../> is present, FLASH wins.',
         'Allowed ops only: actor.set ({id,set:{name,at,location,position,doing,agenda,valence,arousal,dominance,focus,aware,fibs,circle,body}}), actor.create ({id,actor:{name,...safe fields}}), scene.set ({set:{spotlight,openBeat,timePressure,environment,positions,time}}).',
-        'Do not emit arbitrary paths, unknown fields, relationship/mechanics reducers, or a full internal-state HTML block.',
-        'Ordinary RP always uses NORMAL, even when ops:[]; ct still advances. Use OOC only for an out-of-character answer and FLASH only when the router chooses FLASH. Never invent values.',
-        `<!--FF5_PATCH {"version":2,"base":${JSON.stringify(selection.meta.head)},"mode":"NORMAL","ops":[]} -->`,
+        'Do not emit arbitrary paths, unknown fields, or relationship/mechanics reducers. Always emit both the full internal-state HTML block and ST_PATCH for NORMAL.',
+        'Ordinary RP always uses NORMAL, even when ops:[]; ct still advances. Use OOC only for an out-of-character answer and FLASH only when the router chooses FLASH. Never invent values. Put ST_PATCH outside and after <!-- GFX_END --> with no markdown fence.',
+        `<!--ST_PATCH {"version":2,"base":${JSON.stringify(selection.meta.head)},"mode":"NORMAL","ops":[]} -->`,
         formatHotStatePack(selection),
     ];
-    return { text: protocol.join('\n'), selection };
+    return { text: protocol.join('\n'), selection, mode };
 }
 
 export const buildHotStatePack = (state, options = {}) => formatHotStatePack(selectHotState(state, options));

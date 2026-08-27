@@ -2,7 +2,7 @@ import { deepClone, hasOwn, isPlainObject, sanitizePlainText, sanitizeTextOrArra
 import { isValidActorId, normalizeActorId } from './identity.js';
 
 export const SCHEMA_VERSION = 2;
-export const EXTENSION_KEY = 'ff5Engine';
+export const EXTENSION_KEY = 'stState';
 export const INITIAL_HEAD = 'GENESIS';
 export const MAX_HISTORY = 100;
 

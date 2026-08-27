@@ -19,6 +19,9 @@ test('strict validation rejects arbitrary paths, unknown ops, bad ranges and IDs
     assert.ok(result.errors.some((error) => /unknown operation/.test(error)));
     const badActor = validatePatchEnvelope({ version: 2, base: 'GENESIS', mode: 'NORMAL', ops: [{ op: 'actor.set', id: 'A', field: 'valence', value: 4 }] }, { state: state() });
     assert.equal(badActor.ok, false);
+    const identityMutation = validatePatchEnvelope({ version: 2, base: 'GENESIS', mode: 'NORMAL', ops: [{ op: 'actor.set', id: 'AL', field: 'id', value: 'BO' }] }, { state: state() });
+    assert.equal(identityMutation.ok, false);
+    assert.ok(identityMutation.errors.some((error) => /not allowlisted/.test(error)));
 });
 
 test('NORMAL actor/scene operations commit atomically and increment ct once', () => {

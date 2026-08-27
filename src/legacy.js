@@ -365,7 +365,7 @@ export function importLegacyState(input, options = {}) {
     const state = createEmptyState({ now: options.now });
     state.opaque.legacy.internalStatesRaw = block.wrappedRaw || block.raw;
     state.opaque.legacy.wrapper = block.wrapper || '';
-    const actorIdComment = block.raw.match(/<!--[\s]*FF5_ACTOR_IDS\s+({[\s\S]*?})\s*-->/i);
+    const actorIdComment = block.raw.match(/<!--[\s]*ST_ACTOR_IDS\s+({[\s\S]*?})\s*-->/i);
     if (actorIdComment) {
         try {
             const map = JSON.parse(actorIdComment[1]);
@@ -400,6 +400,19 @@ export function importLegacyState(input, options = {}) {
         state.worldSim = { raw: worldSim.raw, data: null };
         state.opaque.legacy.worldSimRaw = worldSim.raw;
     }
+    if (options.requireComplete) {
+        const required = [
+            ['turn header', turn], ['NPC STATE', npc], ['FACTIONS', factions], ['BONDS', bonds],
+            ['EMOTIONAL RESIDUE', residue], ['QUESTS', quests], ['INV & SKILLS', inventory],
+            ["CHEKHOV'S GUN", chekhov], ['INTERNAL THOUGHTS', thoughts], ["GM'S NOTEBOOK", notebook],
+            ['DND TASK SIM', dnd], ['WORLD SIM', worldSim], ['SCENE & WORLD', scene],
+        ];
+        const missingSections = required.filter(([, value]) => !value).map(([name]) => name);
+        if (missingSections.length) {
+            const reason = `Incomplete <internal_states> block; missing ${missingSections.join(', ')}`;
+            return { ok: false, state: migrateState(options.baseState), diagnostics: [reason], block, missingSections };
+        }
+    }
     const siblingSections = tree.children.includes(outer) ? tree.children.filter((node) => node !== outer) : [];
     for (const node of [...(outer.children ?? []), ...siblingSections]) {
         if (known.has(node) || /INTERNAL\s+STATES/i.test(node.summary) || /WORLD\s+SIM/i.test(node.summary)) continue;
@@ -418,7 +431,7 @@ export function importLegacyState(input, options = {}) {
     }
     state.meta.mode = 'NORMAL';
     state.schemaVersion = 2;
-    return { ok: true, state, diagnostics, block };
+    return { ok: true, complete: true, state, diagnostics, block, missingSections: [] };
 }
 
 export function parseLegacyState(input, options = {}) {
@@ -473,7 +486,7 @@ export function exportLegacyState(input, options = {}) {
     lines.push('<!-- GFX_START -->');
     lines.push('<internal_states>');
     const actorIds = Object.fromEntries(Object.values(state.actors).map((actor) => [sanitizePlainText(actor.name || actor.id, { maxLength: 200, preserveNewlines: false }), actor.id]).filter(([label, id]) => label && isValidActorId(id)));
-    lines.push(`<!-- FF5_ACTOR_IDS ${JSON.stringify(actorIds)} -->`);
+    lines.push(`<!-- ST_ACTOR_IDS ${JSON.stringify(actorIds)} -->`);
     lines.push(exportDetails(`🎬 INTERNAL STATES (Turn: ${state.ct})`, [
         exportDetails(SECTION_NAMES.npc, Object.values(state.actors).map(exportActorLine).join('\n')),
         exportDetails(SECTION_NAMES.factions, Object.values(state.factions).map((faction) => `- <b>${valueOrNone(faction.name)}</b> | Goal: ${valueOrNone(faction.goal)} | Intel: ${valueOrNone(faction.intel)} | Fibs: ${valueOrNone(faction.fibs)} | State: ${valueOrNone(faction.state)} | Conflict: ${valueOrNone(faction.conflict)} | Relations: ${valueOrNone(faction.relations)}`).join('\n')),
@@ -490,7 +503,7 @@ export function exportLegacyState(input, options = {}) {
     ].join('\n\n')));
     const opaque = state.opaque?.legacy;
     const unknownSections = Object.values(opaque?.sections ?? {}).filter((raw) => typeof raw === 'string' && raw.trim());
-    const unknownLines = Object.entries(opaque?.unparsed ?? {}).flatMap(([section, values]) => (values ?? []).map((value) => `<!-- FF5 opaque ${section} -->\n${String(value)}`));
+    const unknownLines = Object.entries(opaque?.unparsed ?? {}).flatMap(([section, values]) => (values ?? []).map((value) => `<!-- ST opaque ${section} -->\n${String(value)}`));
     if (unknownSections.length || unknownLines.length) lines.push(exportDetails('🗃️ OPAQUE LEGACY DATA', [...unknownSections, ...unknownLines].join('\n')));
     lines.push('</internal_states>');
     lines.push('<!-- GFX_END -->');

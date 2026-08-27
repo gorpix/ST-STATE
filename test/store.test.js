@@ -27,8 +27,8 @@ test('store reads fresh chat metadata reference after chat switch', async () => 
     const second = store.load();
     assert.equal(second.scene.openBeat, 'None');
     second.scene.openBeat = 'two'; await store.save(second, { expectedChatId: 'two' });
-    assert.equal(host.contexts.one.chatMetadata.ff5Engine.scene.openBeat, 'one');
-    assert.equal(host.contexts.two.chatMetadata.ff5Engine.scene.openBeat, 'two');
+    assert.equal(host.contexts.one.chatMetadata.stState.scene.openBeat, 'one');
+    assert.equal(host.contexts.two.chatMetadata.stState.scene.openBeat, 'two');
 });
 
 test('backup/restore previews diff before writing and migrates old version', async () => {
@@ -45,6 +45,18 @@ test('backup/restore previews diff before writing and migrates old version', asy
     const migrated = store.parseBackup(JSON.stringify({ version: 1, ct: 2, head: 'old', scene: {} }));
     assert.equal(migrated.state.schemaVersion, 2);
     assert.equal(migrated.state.ct, 2);
+});
+
+test('shadow sidecar keeps bounded report history and seen identities', async () => {
+    const host = makeHost();
+    const store = new ChatStore(host, { now: () => 1 });
+    const state = store.load();
+    await store.saveShadowCommit(state, { version: 1, status: 'match', messageId: 'm1', transactionId: 't1' }, { expectedChatId: 'one' });
+    await store.saveShadowReport({ version: 1, status: 'diverged', messageId: 'm2', transactionId: 't2' }, { expectedChatId: 'one' });
+    const sidecar = store.getShadowReport();
+    assert.equal(sidecar.status, 'diverged');
+    assert.equal(sidecar.reports.length, 2);
+    assert.deepEqual(sidecar.seen, ['message:m1', 'tx:t1', 'message:m2', 'tx:t2']);
 });
 
 

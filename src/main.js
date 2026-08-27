@@ -1,10 +1,12 @@
 import { HostAdapter } from './adapter.js';
 import { ChatStore } from './store.js';
-import { FF5Engine } from './engine.js';
+import { STStateEngine } from './engine.js';
 import { DiagnosticLog } from './diagnostics.js';
 import { mountSettingsUI, renderDiagnosticEvents, renderReadOnlyDashboard } from './ui.js';
 import { stableMessageIdentity } from './identity.js';
 import { messageText } from './patch.js';
+import { CHAT_CONFIG_KEY, DEFAULT_ENGINE_MODE, ENGINE_MODES, SETTINGS_KEY, ensureGlobalSettings, getChatMode, getGlobalDefaultMode, normalizeEngineMode, setChatMode, setGlobalDefaultMode } from './modes.js';
+import { deepClone } from './util.js';
 
 export const runtimeState = {
     adapter: null,
@@ -49,9 +51,18 @@ function isAssistantMessage(message) {
 function ensureSettings(adapter) {
     const settings = adapter.getSettings();
     if (!settings) return null;
-    if (!settings.ff5Engine || typeof settings.ff5Engine !== 'object') settings.ff5Engine = { enabled: true, diagnostics: true };
-    if (typeof settings.ff5Engine.enabled !== 'boolean') settings.ff5Engine.enabled = true;
-    return settings.ff5Engine;
+    return ensureGlobalSettings(settings);
+}
+
+function stateHasBaseline(state) {
+    return Number(state?.ct ?? state?.meta?.ct ?? 0) > 0
+        || String(state?.head ?? state?.meta?.head ?? 'GENESIS') !== 'GENESIS'
+        || Object.keys(state?.actors ?? {}).length > 0
+        || Boolean(state?.opaque?.legacy?.internalStatesRaw || Object.keys(state?.opaque?.legacy?.sections ?? {}).length);
+}
+
+function chatHasLegacyState(adapter) {
+    return (adapter?.getChat?.() ?? []).some((message) => /<internal_states\b/i.test(messageText(message)));
 }
 
 function refreshUI() {
@@ -73,8 +84,8 @@ async function onMessageReceived(data) {
     const chatId = adapter.getChatId();
     const identity = stableMessageIdentity(message, index, chatId);
     if (!message.extra || typeof message.extra !== 'object' || Array.isArray(message.extra)) message.extra = {};
-    const attachedIdentity = !message.extra.ff5MessageId;
-    if (attachedIdentity) message.extra.ff5MessageId = identity;
+    const attachedIdentity = !message.extra.stStateMessageId;
+    if (attachedIdentity) message.extra.stStateMessageId = identity;
     const result = await engine.processAssistantMessage(message, { index, messageIdentity: identity, expectedChatId: chatId });
     if (attachedIdentity && result.status === 'missing') {
         try { await adapter.saveChat(); } catch { /* message identity is a best-effort branch aid */ }
@@ -102,14 +113,19 @@ function mountUI() {
     const settingsRoot = mountSettingsUI({
         host: runtimeState.adapter,
         store: runtimeState.store,
+        getMode: () => runtimeState.engine?.getMode?.() ?? DEFAULT_ENGINE_MODE,
+        setMode: async (mode) => setRuntimeMode(mode),
+        getDefaultMode: () => getGlobalDefaultMode(runtimeState.adapter?.getSettings?.()),
+        setDefaultMode: async (mode) => setGlobalRuntimeMode(mode),
+        getShadowReport: () => runtimeState.store?.getShadowReport?.(),
         getDiagnosticEvents: () => runtimeState.engine?.diagnostics?.list?.() ?? [],
         onRefresh: refreshUI,
     });
     if (!settingsRoot) return;
     runtimeState.ui = {
         settingsRoot,
-        dashboard: settingsRoot.querySelector('.ff5-dashboard'),
-        diagnosticEvents: settingsRoot.querySelector('.ff5-diagnostic-events'),
+        dashboard: settingsRoot.querySelector('.st-dashboard'),
+        diagnosticEvents: settingsRoot.querySelector('.st-diagnostic-events'),
     };
     if (!runtimeState.ui.dashboard) {
         runtimeState.ui.dashboard = document.createElement('div');
@@ -124,7 +140,7 @@ export function initialize() {
     const diagnostics = new DiagnosticLog();
     runtimeState.adapter = adapter;
     runtimeState.store = new ChatStore(adapter);
-    runtimeState.engine = new FF5Engine({ adapter, store: runtimeState.store, diagnostics });
+    runtimeState.engine = new STStateEngine({ adapter, store: runtimeState.store, diagnostics });
     runtimeState.settings = ensureSettings(adapter);
     const capabilities = adapter.diagnostics();
     for (const [key, available] of Object.entries(capabilities)) if (!available && key !== 'stagingFormatterDetected') diagnostics.warn('CAPABILITY', `${key} is unavailable; affected features will remain safely disabled.`);
@@ -137,7 +153,55 @@ export function initialize() {
     return runtimeState;
 }
 
-export async function ff5EngineGenerateInterceptor(chat, _contextSize, _abort, type = 'normal') {
+export async function setRuntimeMode(mode) {
+    const adapter = runtimeState.adapter ?? new HostAdapter();
+    if (!runtimeState.adapter) runtimeState.adapter = adapter;
+    const metadata = adapter.getMetadata?.();
+    const normalized = normalizeEngineMode(mode);
+    const store = runtimeState.store ?? new ChatStore(adapter);
+    if (normalized === 'SHADOW' && chatHasLegacyState(adapter) && !stateHasBaseline(store.load({ initialize: false }))) {
+        throw new Error('Import the latest chat <internal_states> baseline before enabling Shadow mode.');
+    }
+    const hadPrevious = Object.prototype.hasOwnProperty.call(metadata ?? {}, CHAT_CONFIG_KEY);
+    const previous = hadPrevious ? deepClone(metadata[CHAT_CONFIG_KEY]) : undefined;
+    const selected = setChatMode(metadata, mode, { now: Date.now() });
+    try {
+        await adapter.saveMetadata?.();
+    } catch (error) {
+        if (hadPrevious) metadata[CHAT_CONFIG_KEY] = previous;
+        else delete metadata[CHAT_CONFIG_KEY];
+        runtimeState.engine?.diagnostics?.warn('MODE_SAVE', `Could not persist chat mode: ${error.message}`);
+        throw error;
+    }
+    refreshUI();
+    return selected;
+}
+
+export async function setGlobalRuntimeMode(mode) {
+    const adapter = runtimeState.adapter ?? new HostAdapter();
+    if (!runtimeState.adapter) runtimeState.adapter = adapter;
+    const settings = adapter.getSettings?.();
+    const normalized = normalizeEngineMode(mode);
+    const store = runtimeState.store ?? new ChatStore(adapter);
+    if (normalized === 'SHADOW' && chatHasLegacyState(adapter) && !stateHasBaseline(store.load({ initialize: false }))) {
+        throw new Error('Import the latest chat <internal_states> baseline before making Shadow the default.');
+    }
+    const hadPrevious = Object.prototype.hasOwnProperty.call(settings ?? {}, SETTINGS_KEY);
+    const previous = hadPrevious ? deepClone(settings[SETTINGS_KEY]) : undefined;
+    const selected = setGlobalDefaultMode(settings, normalized);
+    try {
+        await adapter.saveSettingsDebounced?.();
+    } catch (error) {
+        if (hadPrevious) settings[SETTINGS_KEY] = previous;
+        else delete settings[SETTINGS_KEY];
+        runtimeState.engine?.diagnostics?.warn('SETTINGS_SAVE', `Could not persist global default mode: ${error.message}`);
+        throw error;
+    }
+    refreshUI();
+    return selected;
+}
+
+export async function stStateGenerateInterceptor(chat, _contextSize, _abort, type = 'normal') {
     if (!runtimeState.engine) initialize();
     if (!runtimeState.engine || !runtimeState.active) return;
     runtimeState.adapter?.noteGenerationType?.(type);

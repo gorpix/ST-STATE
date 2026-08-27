@@ -8,7 +8,7 @@ export const MAX_PATCH_OPS = 50;
 export const MAX_PATCH_TEXT = 4000;
 
 export class PatchValidationError extends Error {
-    constructor(errors, message = 'FF5 patch validation failed') {
+    constructor(errors, message = 'ST-STATE patch validation failed') {
         super(message);
         this.name = 'PatchValidationError';
         this.errors = [...errors];

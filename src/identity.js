@@ -54,7 +54,7 @@ export function canonicalActorId(value, actors = {}) {
 
 export function stableMessageIdentity(message, index = -1, chatId = '') {
     if (!message || typeof message !== 'object') return `message:${chatId}:${index}`;
-    const explicit = message.extra?.ff5MessageId ?? message.ff5MessageId ?? message.message_id ?? message.id;
+    const explicit = message.extra?.stStateMessageId ?? message.stStateMessageId ?? message.message_id ?? message.id;
     if (explicit !== undefined && explicit !== null && String(explicit).trim()) return String(explicit);
     if (message.send_date !== undefined && message.send_date !== null) return `date:${chatId}:${message.send_date}:${index}`;
     const text = message.mes ?? message.message ?? message.content ?? '';

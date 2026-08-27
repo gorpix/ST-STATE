@@ -1,6 +1,7 @@
 import { deepClone, isPlainObject } from './util.js';
 
-const PATCH_COMMENT = /<!--[\s]*FF5_PATCH\b([\s\S]*?)-->/gi;
+const PATCH_COMMENT = /<!--[\s]*ST_PATCH\b([\s\S]*?)-->/gi;
+const DANGLING_PATCH_COMMENT = /<!--[\s]*ST_PATCH\b[\s\S]*$/gi;
 const FLASH_HANDOFF = /<flash_handoff\b[^>]*\/?>(?:[\s\S]*?<\/flash_handoff\s*>)?/gi;
 
 function jsonCandidate(body) {
@@ -9,7 +10,7 @@ function jsonCandidate(body) {
 }
 
 export function parsePatchComment(raw, body = undefined) {
-    const candidate = jsonCandidate(body ?? String(raw ?? '').replace(/^<!--[\s]*FF5_PATCH/i, '').replace(/-->\s*$/g, ''));
+    const candidate = jsonCandidate(body ?? String(raw ?? '').replace(/^<!--[\s]*ST_PATCH/i, '').replace(/-->\s*$/g, ''));
     try {
         const parsed = JSON.parse(candidate);
         if (!isPlainObject(parsed)) throw new Error('Patch JSON must be an object');
@@ -24,13 +25,13 @@ export function hasFlashHandoff(text) {
 }
 
 export function removeControlPayload(text, { removeFlashHandoff = true } = {}) {
-    let prose = String(text ?? '').replace(PATCH_COMMENT, '');
+    let prose = String(text ?? '').replace(PATCH_COMMENT, '').replace(DANGLING_PATCH_COMMENT, '');
     if (removeFlashHandoff) prose = prose.replace(FLASH_HANDOFF, '');
     return prose;
 }
 
 /**
- * Extract the last FF5_PATCH comment. All matching comments are reported so a
+ * Extract the last ST_PATCH comment. All matching comments are reported so a
  * caller can remove control payload from display without exposing malformed JSON.
  */
 export function extractHiddenPatch(text) {
@@ -46,6 +47,7 @@ export function extractHiddenPatch(text) {
     const latest = comments.at(-1) ?? null;
     return {
         found: comments.length > 0,
+        controlBearing: comments.length > 0 || /<!--[\s]*ST_PATCH\b/i.test(source) || hasFlashHandoff(source),
         complete: comments.length > 0,
         comments,
         latest,

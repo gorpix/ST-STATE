@@ -1,6 +1,7 @@
 import { exportLegacyState, importLegacyState } from './legacy.js';
 import { stateSummary } from './schema.js';
 import { deepClone, sanitizePlainText } from './util.js';
+import { ENGINE_MODES, SELECTABLE_MODES, NATIVE_MODE_LOCKED } from './modes.js';
 
 function element(tag, className = '', text = undefined) {
     const node = document.createElement(tag);
@@ -10,8 +11,8 @@ function element(tag, className = '', text = undefined) {
 }
 
 function appendLabelValue(parent, label, value) {
-    const row = element('div', 'ff5-kv');
-    row.append(element('span', 'ff5-kv-label', label), element('span', 'ff5-kv-value', value ?? 'None'));
+    const row = element('div', 'st-kv');
+    row.append(element('span', 'st-kv-label', label), element('span', 'st-kv-value', value ?? 'None'));
     parent.append(row);
     return row;
 }
@@ -23,46 +24,46 @@ function stringValue(value) {
 }
 
 function section(title, content, { open = false, className = '' } = {}) {
-    const details = element('details', `ff5-section ${className}`);
+    const details = element('details', `st-section ${className}`);
     details.open = open;
-    const summary = element('summary', 'ff5-section-title', title);
+    const summary = element('summary', 'st-section-title', title);
     details.append(summary, content);
     return details;
 }
 
 function listContent(items) {
-    const wrapper = element('div', 'ff5-list');
-    if (!Array.isArray(items) || items.length === 0) wrapper.append(element('div', 'ff5-empty', 'None'));
-    else for (const item of items) wrapper.append(element('div', 'ff5-list-item', typeof item === 'string' ? item : stringValue(item)));
+    const wrapper = element('div', 'st-list');
+    if (!Array.isArray(items) || items.length === 0) wrapper.append(element('div', 'st-empty', 'None'));
+    else for (const item of items) wrapper.append(element('div', 'st-list-item', typeof item === 'string' ? item : stringValue(item)));
     return wrapper;
 }
 
 function actorCard(actor, id) {
-    const card = element('article', 'ff5-actor-card');
+    const card = element('article', 'st-actor-card');
     const heading = element('h4', '', `${actor?.name ?? id} `);
-    heading.append(element('code', 'ff5-actor-id', id));
+    heading.append(element('code', 'st-actor-id', id));
     card.append(heading);
     for (const [label, value] of [['At', actor?.at ?? actor?.location ?? actor?.position], ['Doing', actor?.doing ?? actor?.activity], ['Agenda', actor?.agenda], ['VAD', [actor?.valence, actor?.arousal, actor?.dominance].every((item) => typeof item === 'number') ? `${actor.valence}/${actor.arousal}/${actor.dominance}` : undefined], ['Focus', actor?.focus], ['Aware', actor?.aware], ['Fibs', actor?.fibs], ['Circle', actor?.circle], ['Body', actor?.body]]) appendLabelValue(card, label, stringValue(value));
     return card;
 }
 
 function relationCard(relation, state) {
-    const card = element('article', 'ff5-relation-card');
+    const card = element('article', 'st-relation-card');
     const labelA = relation.labelA || state.actors?.[relation.a]?.name || relation.a;
     const labelB = relation.labelB || state.actors?.[relation.b]?.name || relation.b;
     card.append(element('h4', '', `${labelA} ↔ ${labelB}`));
-    const metrics = [['BOND', relation.bond, -5, 20, 'ff5-bond'], ['SPARKS', relation.sparks, 0, 20, 'ff5-sparks'], ['GRUDGE', relation.grudge, 0, 20, 'ff5-grudge']];
+    const metrics = [['BOND', relation.bond, -5, 20, 'st-bond'], ['SPARKS', relation.sparks, 0, 20, 'st-sparks'], ['GRUDGE', relation.grudge, 0, 20, 'st-grudge']];
     for (const [label, value, min, max, className] of metrics) {
-        const row = element('div', 'ff5-meter-row');
-        row.append(element('span', 'ff5-meter-label', `${label} ${value ?? 0}`));
-        const meter = element('meter', `ff5-meter ${className}`);
+        const row = element('div', 'st-meter-row');
+        row.append(element('span', 'st-meter-label', `${label} ${value ?? 0}`));
+        const meter = element('meter', `st-meter ${className}`);
         meter.min = min; meter.max = max; meter.value = Math.max(min, Math.min(max, Number(value) || 0));
         meter.setAttribute('aria-label', `${label} ${value ?? 0}`);
         row.append(meter); card.append(row);
     }
     const profiles = relation.profile ? Object.values(relation.profile) : [];
     for (const profile of profiles) {
-        const profileBox = element('div', 'ff5-profile');
+        const profileBox = element('div', 'st-profile');
         const from = state.actors?.[profile.from]?.name || profile.from;
         const to = state.actors?.[profile.to]?.name || profile.to;
         profileBox.append(element('strong', '', `Profile ${from} → ${to}`));
@@ -73,12 +74,12 @@ function relationCard(relation, state) {
 }
 
 function renderHistory(state) {
-    const wrapper = element('div', 'ff5-history');
+    const wrapper = element('div', 'st-history');
     if (!state.history?.length) return listContent([]);
     for (const entry of [...state.history].reverse()) {
-        const item = element('details', 'ff5-history-item');
+        const item = element('details', 'st-history-item');
         item.append(element('summary', '', `ct ${entry.ct} · ${entry.summary || entry.transactionId || 'NORMAL commit'}`));
-        const body = element('div', 'ff5-history-body');
+        const body = element('div', 'st-history-body');
         appendLabelValue(body, 'Head', `${entry.base ?? '?'} → ${entry.head ?? '?'}`);
         appendLabelValue(body, 'Message', entry.messageId || 'unknown');
         appendLabelValue(body, 'Transaction', entry.transactionId || 'unknown');
@@ -94,22 +95,22 @@ export function renderReadOnlyDashboard(container, inputState, { openSections = 
     if (!container || typeof document === 'undefined') return null;
     const state = deepClone(inputState ?? {});
     container.replaceChildren();
-    container.classList.add('ff5-dashboard');
+    container.classList.add('st-dashboard');
     const summary = stateSummary(state);
-    const header = element('div', 'ff5-dashboard-header');
-    header.append(element('h3', '', 'ST-STATE'), element('span', 'ff5-status-pill', `ct ${summary.ct}`));
-    const digest = element('div', 'ff5-dashboard-digest');
+    const header = element('div', 'st-dashboard-header');
+    header.append(element('h3', '', 'ST-STATE'), element('span', 'st-status-pill', `ct ${summary.ct}`));
+    const digest = element('div', 'st-dashboard-digest');
     appendLabelValue(digest, 'Head', summary.head);
     appendLabelValue(digest, 'Actors', summary.actors);
     appendLabelValue(digest, 'Relations', summary.relations);
     appendLabelValue(digest, 'Schema', summary.schemaVersion);
     container.append(header, digest);
 
-    const actorGrid = element('div', 'ff5-card-grid');
+    const actorGrid = element('div', 'st-card-grid');
     for (const [id, actor] of Object.entries(state.actors ?? {})) actorGrid.append(actorCard(actor, id));
     container.append(section('👥 Actors', actorGrid, { open: openSections.includes('actors') }));
 
-    const scene = element('div', 'ff5-content');
+    const scene = element('div', 'st-content');
     appendLabelValue(scene, 'Spotlight', stringValue(state.scene?.spotlight));
     appendLabelValue(scene, 'Open beat', state.scene?.openBeat);
     appendLabelValue(scene, 'Time pressure', state.scene?.timePressure);
@@ -118,23 +119,23 @@ export function renderReadOnlyDashboard(container, inputState, { openSections = 
     appendLabelValue(scene, 'Time', state.scene?.time);
     container.append(section('🌌 Scene & world', scene, { open: true }));
 
-    const relationGrid = element('div', 'ff5-card-grid ff5-relation-grid');
+    const relationGrid = element('div', 'st-card-grid st-relation-grid');
     for (const relation of Object.values(state.relations?.pairs ?? {})) relationGrid.append(relationCard(relation, state));
     container.append(section('💚 Relations & profiles', relationGrid, { open: openSections.includes('relations') }));
 
-    const factionGrid = element('div', 'ff5-card-grid');
+    const factionGrid = element('div', 'st-card-grid');
     for (const faction of Object.values(state.factions ?? {})) {
-        const card = element('article', 'ff5-actor-card'); card.append(element('h4', '', faction.name || 'Faction'));
+        const card = element('article', 'st-actor-card'); card.append(element('h4', '', faction.name || 'Faction'));
         for (const [label, value] of [['Goal', faction.goal], ['Intel', faction.intel], ['Fibs', faction.fibs], ['State', faction.state], ['Conflict', faction.conflict], ['Relations', faction.relations]]) appendLabelValue(card, label, stringValue(value));
         factionGrid.append(card);
     }
     container.append(section('🏳️ Factions', factionGrid));
     const residue = listContent(state.residue); container.append(section('🧩 Emotional residue', residue));
     const quests = listContent(state.quests); container.append(section('📜 Quests', quests));
-    const inventory = element('div', 'ff5-content');
+    const inventory = element('div', 'st-content');
     for (const [label, value] of [['Inventory', state.inventory?.items], ['Titles / skills', state.inventory?.titlesSkills], ['Status', state.inventory?.status], ['Modifiers', state.inventory?.modifiers]]) appendLabelValue(inventory, label, stringValue(value));
     container.append(section('🎒 Inventory & skills', inventory));
-    const chekhov = element('div', 'ff5-content');
+    const chekhov = element('div', 'st-content');
     for (const [label, value] of [['Active', state.chekhov?.active], ['Locked', state.chekhov?.locked], ['Fired', state.chekhov?.fired]]) appendLabelValue(chekhov, label, stringValue(value));
     container.append(section("🔫 Chekhov's gun", chekhov));
     container.append(section('🧠 Thoughts', listContent(state.thoughts)));
@@ -155,10 +156,10 @@ export const renderDashboard = renderReadOnlyDashboard;
 export function renderDiagnostics(container, diagnostics) {
     if (!container || typeof document === 'undefined') return null;
     container.replaceChildren();
-    const table = element('div', 'ff5-diagnostics');
+    const table = element('div', 'st-diagnostics');
     for (const [key, value] of Object.entries(diagnostics ?? {})) {
-        const row = element('div', 'ff5-diagnostic-row');
-        row.append(element('span', '', key), element('span', value ? 'ff5-ok' : 'ff5-warning', value ? 'available' : 'unavailable'));
+        const row = element('div', 'st-diagnostic-row');
+        row.append(element('span', '', key), element('span', value ? 'st-ok' : 'st-warning', value ? 'available' : 'unavailable'));
         table.append(row);
     }
     container.append(table);
@@ -170,16 +171,16 @@ export function renderDiagnosticEvents(container, entries = []) {
     container.replaceChildren();
     const events = Array.isArray(entries) ? entries.slice(-20).reverse() : [];
     if (!events.length) {
-        container.append(element('div', 'ff5-empty', 'No engine warnings.'));
+        container.append(element('div', 'st-empty', 'No engine warnings.'));
         return container;
     }
     for (const entry of events) {
-        const row = element('div', `ff5-diagnostic-event ff5-${entry.level || 'info'}`);
+        const row = element('div', `st-diagnostic-event st-${entry.level || 'info'}`);
         const when = Number.isFinite(entry.at) ? new Date(entry.at).toLocaleTimeString() : '';
         row.append(
-            element('strong', 'ff5-diagnostic-code', entry.code || 'FF5'),
-            element('span', 'ff5-diagnostic-message', entry.message || ''),
-            element('time', 'ff5-diagnostic-time', when),
+            element('strong', 'st-diagnostic-code', entry.code || 'ST-STATE'),
+            element('span', 'st-diagnostic-message', entry.message || ''),
+            element('time', 'st-diagnostic-time', when),
         );
         container.append(row);
     }
@@ -208,38 +209,119 @@ function downloadText(filename, text, type = 'application/json') {
 }
 
 /** Mount a small settings drawer and wire backup/restore + read-only dashboard. */
-export function mountSettingsUI({ host, store, getDiagnosticEvents = () => [], onRefresh = () => {}, root = null } = {}) {
+export function renderShadowParity(container, report) {
+    if (!container || typeof document === 'undefined') return null;
+    container.replaceChildren();
+    const value = report ?? {};
+    const status = value.status || 'not-run';
+    const title = status === 'match' ? 'Parity: match' : status === 'diverged' ? 'Parity: diverged' : 'Parity: not run';
+    container.append(element('h4', '', title));
+    appendLabelValue(container, 'Supported', (value.supportedRoots ?? ['ct', 'actors', 'scene']).join(', '));
+    appendLabelValue(container, 'Matches', Array.isArray(value.matches) ? value.matches.length : 0);
+    appendLabelValue(container, 'Divergences', Array.isArray(value.mismatches) ? value.mismatches.length : 0);
+    appendLabelValue(container, 'Unsupported', (value.unsupportedDomains ?? value.unsupported ?? []).join(', ') || 'None');
+    if (Array.isArray(value.mismatches)) for (const mismatch of value.mismatches.slice(0, 20)) appendLabelValue(container, mismatch.path, `${stringValue(mismatch.expected)} → ${stringValue(mismatch.actual)}`);
+    return container;
+}
+
+export function mountSettingsUI({ host, store, getMode = () => 'LEGACY', setMode = async () => {}, getDefaultMode = () => 'LEGACY', setDefaultMode = async () => {}, getShadowReport = () => null, getDiagnosticEvents = () => [], onRefresh = () => {}, root = null } = {}) {
     if (typeof document === 'undefined' || !store) return null;
     const parent = root || document.querySelector('#extensions_settings2, #extensions_settings');
     if (!parent) return null;
-    const existing = parent.querySelector('#ff5-engine-settings');
+    const existing = parent.querySelector('#st-state-settings');
     if (existing) return existing;
-    const wrapper = element('div', 'ff5-settings'); wrapper.id = 'ff5-engine-settings';
+    const wrapper = element('div', 'st-settings'); wrapper.id = 'st-state-settings';
     const details = element('details', 'inline-drawer');
-    details.append(element('summary', 'inline-drawer-header', 'ST-STATE v0.2'));
+    details.append(element('summary', 'inline-drawer-header', 'ST-STATE v0.3 evaluator'));
     const content = element('div', 'inline-drawer-content');
-    const controls = element('div', 'ff5-controls');
+    const controls = element('div', 'st-controls');
+    const modeLabel = element('label', 'st-mode-label', 'Chat mode');
+    const mode = element('select', 'st-mode-select'); mode.setAttribute('aria-label', 'ST-STATE chat mode');
+    for (const optionMode of ENGINE_MODES) {
+        const option = element('option', '', optionMode);
+        option.value = optionMode;
+        option.disabled = optionMode === 'NATIVE' && NATIVE_MODE_LOCKED;
+        mode.append(option);
+    }
+    mode.value = getMode();
+    modeLabel.append(mode);
+    const defaultModeLabel = element('label', 'st-mode-label', 'Default mode');
+    const defaultMode = element('select', 'st-mode-select'); defaultMode.setAttribute('aria-label', 'ST-STATE global default mode');
+    for (const optionMode of SELECTABLE_MODES) {
+        const option = element('option', '', optionMode); option.value = optionMode; defaultMode.append(option);
+    }
+    defaultMode.value = getDefaultMode();
+    defaultModeLabel.append(defaultMode);
     const refresh = element('button', 'menu_button', 'Refresh dashboard');
     const backup = element('button', 'menu_button', 'Download JSON backup');
     const legacy = element('button', 'menu_button', 'Download legacy state');
-    const file = element('input'); file.type = 'file'; file.accept = '.json,.txt,.html,application/json,text/plain,text/html'; file.setAttribute('aria-label', 'Restore or import FF5 state');
-    controls.append(refresh, backup, legacy, file);
-    const diagnostics = element('div', 'ff5-capability-diagnostics');
-    const diagnosticEvents = element('div', 'ff5-diagnostic-events');
-    const preview = element('div', 'ff5-import-preview'); const dashboard = element('div');
-    content.append(controls, element('h4', '', 'Capabilities'), diagnostics, element('h4', '', 'Engine diagnostics'), diagnosticEvents, element('h4', '', 'Read-only dashboard'), dashboard, preview);
+    const importLatest = element('button', 'menu_button', 'Import latest chat state');
+    const file = element('input'); file.type = 'file'; file.accept = '.json,.txt,.html,application/json,text/plain,text/html'; file.setAttribute('aria-label', 'Restore or import ST-STATE data');
+    controls.append(defaultModeLabel, modeLabel, refresh, backup, legacy, importLatest, file);
+    const diagnostics = element('div', 'st-capability-diagnostics');
+    const diagnosticEvents = element('div', 'st-diagnostic-events');
+    const parity = element('div', 'st-shadow-parity');
+    const preview = element('div', 'st-import-preview'); const dashboard = element('div');
+    content.append(controls, element('h4', '', 'Capabilities'), diagnostics, element('h4', '', 'Engine diagnostics'), diagnosticEvents, element('h4', '', 'Shadow parity'), parity, element('h4', '', 'Read-only dashboard'), dashboard, preview);
     details.append(content); wrapper.append(details); parent.append(wrapper);
     const refreshAll = () => {
         try {
             renderDiagnostics(diagnostics, host?.diagnostics?.());
             renderDiagnosticEvents(diagnosticEvents, getDiagnosticEvents());
             renderReadOnlyDashboard(dashboard, store.load());
+            renderShadowParity(parity, getShadowReport());
             onRefresh();
-        } catch (error) { diagnostics.replaceChildren(element('div', 'ff5-warning', error.message)); }
+        } catch (error) { diagnostics.replaceChildren(element('div', 'st-warning', error.message)); }
     };
     refresh.addEventListener('click', refreshAll);
-    backup.addEventListener('click', () => downloadText('ff5-state-backup.json', store.backup()));
-    legacy.addEventListener('click', () => downloadText('ff5-internal-states.html', exportLegacyState(store.load()), 'text/html'));
+    mode.addEventListener('change', async () => {
+        if (mode.value === 'NATIVE' && NATIVE_MODE_LOCKED) { mode.value = getMode(); return; }
+        try { await setMode(mode.value); } catch (error) { mode.value = getMode(); renderImportPreview(preview, { changed: false, currentDigest: 'error', importedDigest: sanitizePlainText(error.message) }, { title: 'Mode change rejected' }); }
+        refreshAll();
+    });
+    defaultMode.addEventListener('change', async () => {
+        try { await setDefaultMode(defaultMode.value); }
+        catch (error) { defaultMode.value = getDefaultMode(); renderImportPreview(preview, { changed: false, currentDigest: 'error', importedDigest: sanitizePlainText(error.message) }, { title: 'Default mode change rejected' }); }
+        refreshAll();
+    });
+    backup.addEventListener('click', () => downloadText('st-state-backup.json', store.recoveryBackup?.() ?? store.backup()));
+    legacy.addEventListener('click', () => downloadText('st-internal-states.html', exportLegacyState(store.load()), 'text/html'));
+    importLatest.addEventListener('click', async () => {
+        try {
+            const chatText = (host?.getChat?.() ?? []).map((message) => message?.mes ?? message?.message ?? message?.content ?? '').join('\n');
+            const imported = importLegacyState(chatText, { now: Date.now(), baseState: store.load(), requireComplete: true });
+            if (!imported.ok) throw new Error(imported.diagnostics?.join('; ') || 'No complete <internal_states> block was found');
+            const current = store.load();
+            const backupDocument = {
+                extension: 'stState',
+                backupVersion: 1,
+                kind: 'pre-shadow-baseline',
+                exportedAt: Date.now(),
+                chatId: host?.getChatId?.() ?? '',
+                state: current,
+                legacyRaw: imported.block?.wrappedRaw ?? imported.block?.raw ?? '',
+            };
+            const parsed = { changed: true, current, imported: imported.state, currentDigest: 'current', importedDigest: imported.digest ?? 'legacy', diff: null, legacy: true };
+            renderImportPreview(preview, parsed, { title: 'Latest chat baseline preview' });
+            if (!globalThis.confirm?.('Import the latest complete <internal_states> block as the Shadow baseline? A recovery file will download first.')) return;
+            downloadText('st-state-pre-shadow-backup.json', JSON.stringify(backupDocument, null, 2));
+            const report = {
+                version: 1,
+                status: 'baseline',
+                mode: 'SHADOW',
+                source: 'manual-latest-chat-import',
+                importedAt: Date.now(),
+                candidateStatus: 'not_comparable',
+                canonical: { source: 'legacy', ct: imported.state.ct, head: imported.state.head, persisted: true },
+                recoveryBackup: backupDocument,
+            };
+            if (typeof store.saveShadowCommit === 'function') await store.saveShadowCommit(imported.state, report, { expectedChatId: host?.getChatId?.() });
+            else await store.save(imported.state, { expectedChatId: host?.getChatId?.() });
+            refreshAll();
+        } catch (error) {
+            renderImportPreview(preview, { changed: false, currentDigest: 'error', importedDigest: sanitizePlainText(error.message) }, { title: 'Baseline import rejected' });
+        }
+    });
     file.addEventListener('change', async () => {
         const selected = file.files?.[0]; if (!selected) return;
         const text = await selected.text();
@@ -252,7 +334,7 @@ export function mountSettingsUI({ host, store, getDiagnosticEvents = () => [], o
                 parsed = { changed: true, current: store.load(), imported: imported.state, currentDigest: 'current', importedDigest: 'legacy', diff: null, legacy: true };
             }
             renderImportPreview(preview, parsed);
-            if (globalThis.confirm?.('Write this FF5 state to the current chat?')) {
+            if (globalThis.confirm?.('Write this ST-STATE data to the current chat?')) {
                 if (parsed.legacy) await store.save(parsed.imported, { expectedChatId: host?.getChatId?.() });
                 else await store.restore(text, { expectedChatId: host?.getChatId?.() });
                 refreshAll();
