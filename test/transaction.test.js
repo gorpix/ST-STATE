@@ -24,6 +24,76 @@ test('strict validation rejects arbitrary paths, unknown ops, bad ranges and IDs
     assert.ok(identityMutation.errors.some((error) => /not allowlisted/.test(error)));
 });
 
+test('all supported legacy actor and scene labels normalize to canonical fields', () => {
+    const before = state();
+    const patch = { version: 2, base: before.head, mode: 'NORMAL', tx: 'legacy-vad', ops: [
+        { op: 'actor.set', id: 'AL', set: { vad: '+2/+1/-1', doing: 'settling' } },
+    ] };
+    const validated = validatePatchEnvelope(patch, { state: before });
+    assert.equal(validated.ok, true);
+    assert.deepEqual(validated.value.ops[0].set, { valence: 2, arousal: 1, dominance: -1, doing: 'settling' });
+
+    const result = applyTransaction(before, patch, { messageIdentity: 'legacy-vad-message', now: 2 });
+    assert.equal(result.status, 'committed');
+    assert.equal(result.state.actors.AL.valence, 2);
+    assert.equal(result.state.actors.AL.arousal, 1);
+    assert.equal(result.state.actors.AL.dominance, -1);
+
+    for (const VAD of ['1,0,-2', '[1/0/-2]', '1 | 0 | -2', '1 0 -2', [1, 0, -2]]) {
+        const uppercase = validatePatchEnvelope({ version: 2, base: before.head, mode: 'NORMAL', ops: [
+            { op: 'actor.set', id: 'AL', set: { VAD } },
+        ] }, { state: before });
+        assert.equal(uppercase.ok, true);
+        assert.deepEqual(uppercase.value.ops[0].set, { valence: 1, arousal: 0, dominance: -2 });
+    }
+
+    const sceneAlias = validatePatchEnvelope({ version: 2, base: before.head, mode: 'NORMAL', ops: [
+        { op: 'actor.set', id: 'AL', set: {
+            At: 'window', Doing: 'watching', Agenda: 'wait', Focus: 'rain', Aware: 'room',
+            Fibs: 'None', Circle: 'Bob', Body: 'well', 'Agenda Step': '1', agenda_max: '3',
+        } },
+        { op: 'scene.set', set: {
+            Spotlight: 'Alice', 'Open Beat': 'The latch turns', time_pressure: 'None', Env: 'Rain against the windows',
+            Positions: { AL: 'window' }, Time: '22:00',
+        } },
+    ] }, { state: before });
+    assert.equal(sceneAlias.ok, true);
+    assert.deepEqual(sceneAlias.value.ops[0].set, {
+        at: 'window', doing: 'watching', agenda: 'wait', focus: 'rain', aware: 'room', fibs: 'None', circle: 'Bob', body: 'well',
+        agendaStep: 1, agendaMax: 3,
+    });
+    assert.deepEqual(sceneAlias.value.ops[1].set, {
+        spotlight: 'Alice', openBeat: 'The latch turns', timePressure: 'None', environment: 'Rain against the windows',
+        positions: { AL: 'window' }, time: '22:00',
+    });
+});
+
+test('legacy vad compatibility remains strict and unambiguous', () => {
+    const before = state();
+    for (const vad of ['+2/+1', '+2/hot/-1', '+3/+1/-1', '+2/+1,-1']) {
+        const result = validatePatchEnvelope({ version: 2, base: before.head, mode: 'NORMAL', ops: [
+            { op: 'actor.set', id: 'AL', field: 'vad', value: vad },
+        ] }, { state: before });
+        assert.equal(result.ok, false);
+        assert.ok(result.errors.some((error) => /legacy vad/.test(error)));
+    }
+    const mixed = validatePatchEnvelope({ version: 2, base: before.head, mode: 'NORMAL', ops: [
+        { op: 'actor.set', id: 'AL', set: { vad: '+2/+1/-1', valence: 0 } },
+    ] }, { state: before });
+    assert.equal(mixed.ok, false);
+    assert.ok(mixed.errors.some((error) => /cannot be combined/.test(error)));
+    const duplicateAlias = validatePatchEnvelope({ version: 2, base: before.head, mode: 'NORMAL', ops: [
+        { op: 'actor.set', id: 'AL', set: { vad: '+2/+1/-1', VAD: '+1/0/-2' } },
+    ] }, { state: before });
+    assert.equal(duplicateAlias.ok, false);
+    assert.ok(duplicateAlias.errors.some((error) => /same canonical field "vad"/.test(error)));
+    const duplicateEnvironment = validatePatchEnvelope({ version: 2, base: before.head, mode: 'NORMAL', ops: [
+        { op: 'scene.set', set: { env: 'rain', environment: 'sun' } },
+    ] }, { state: before });
+    assert.equal(duplicateEnvironment.ok, false);
+    assert.ok(duplicateEnvironment.errors.some((error) => /same canonical field "environment"/.test(error)));
+});
+
 test('NORMAL actor/scene operations commit atomically and increment ct once', () => {
     const before = state();
     const patch = { version: 2, base: before.head, mode: 'NORMAL', tx: 'turn-1', ops: [

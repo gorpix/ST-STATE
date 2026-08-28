@@ -124,6 +124,29 @@ test('malformed local GFX is stripped and never rendered', async () => {
     } finally { resetRuntime(); }
 });
 
+test('a malformed replacement cannot resurrect a cached artifact for the same visible swipe', async () => {
+    const calls = [];
+    const visible = 'Visible reply';
+    const message = { mes: `${visible}\n${control}`, swipe_id: 0, extra: {} };
+    runtimeState.adapter = {
+        getChatId: () => 'chat-stale-cache',
+        getSettings: () => ({ stState: {} }),
+        saveChat: async () => {},
+    };
+    runtimeState.engine = { getMode: () => 'SHADOW', diagnostics: { warn: () => {} } };
+    runtimeState.gfxOverlay = { configure: () => {}, replaceBranch: (branchId, events) => calls.push({ branchId, events }) };
+    try {
+        assert.equal((await renderLocalGfx(message, 2)).status, 'rendered');
+        assert.equal(Object.keys(message.extra.stStateGfx).length, 1);
+
+        message.mes = `${visible}\n<!--ST_GFX\nV1\nkind=phone\n-->`;
+        const replacement = await renderLocalGfx(message, 2);
+        assert.equal(replacement.status, 'rejected');
+        assert.equal(message.extra.stStateGfx, undefined);
+        assert.deepEqual(calls.at(-1).events, []);
+    } finally { resetRuntime(); }
+});
+
 test('LEGACY and RECOVERY never parse, cache, strip, or render local GFX', async () => {
     for (const mode of ['LEGACY', 'RECOVERY']) {
         let overlayCalls = 0;

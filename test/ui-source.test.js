@@ -1,12 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { requestGfxPreview } from '../src/ui.js';
+
+test('GFX gallery dispatches phone skins as a canonical phone selection', () => {
+    const calls = [];
+    requestGfxPreview((...args) => calls.push(args), 'ios');
+    requestGfxPreview((...args) => calls.push(args), 'android');
+    requestGfxPreview((...args) => calls.push(args), 'map');
+    assert.deepEqual(calls, [
+        ['phone', { platform: 'ios' }],
+        ['phone', { platform: 'android' }],
+        ['map'],
+    ]);
+});
 
 test('settings panel uses the SillyTavern delegated inline-drawer contract', async () => {
     const source = await readFile(new URL('../src/ui.js', import.meta.url), 'utf8');
     assert.match(source, /inline-drawer-toggle inline-drawer-header/);
     assert.match(source, /inline-drawer-icon fa-solid fa-circle-chevron-down down interactable/);
     assert.match(source, /Candidate errors/);
+    assert.match(source, /SHADOW SUCCESS/);
+    assert.match(source, /st-parity-success/);
+    assert.match(source, /Candidate committed/);
     assert.doesNotMatch(source, /element\('details', 'inline-drawer'\)/);
 });
 
@@ -25,9 +41,20 @@ test('settings panel exposes confirmation-gated recovery controls and callback h
 
 test('settings panel exposes local GFX controls and both phone previews', async () => {
     const source = await readFile(new URL('../src/ui.js', import.meta.url), 'utf8');
-    for (const label of ['Local pop-in GFX', 'Minimum duration', 'Preview iPhone-like', 'Preview Android-like']) assert.match(source, new RegExp(label));
+    for (const label of ['Local pop-in GFX', 'Minimum duration', 'Preview kind', 'Preview selected GFX', 'Preview iPhone-like', 'Preview Android-like']) assert.match(source, new RegExp(label));
     for (const callback of ['getGfxSettings', 'setGfxSettings', 'onPreviewGfx']) assert.match(source, new RegExp(callback));
     assert.match(source, /durationMs/);
+    assert.match(source, /GFX_MEDIA_KINDS/);
+});
+
+test('successful Shadow parity is styled as a live status result', async () => {
+    const uiSource = await readFile(new URL('../src/ui.js', import.meta.url), 'utf8');
+    const mainSource = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
+    const cssSource = await readFile(new URL('../style.css', import.meta.url), 'utf8');
+    assert.match(uiSource, /aria-live/);
+    assert.match(mainSource, /renderShadowParity\(runtimeState\.ui\.parity/);
+    assert.match(mainSource, /parity:\s*settingsRoot\.querySelector\('\.st-shadow-parity'\)/);
+    assert.match(cssSource, /\.st-shadow-parity\.st-parity-success/);
 });
 
 test('phone skins retain a fixed device ratio with a scrolling content viewport', async () => {
@@ -35,4 +62,14 @@ test('phone skins retain a fixed device ratio with a scrolling content viewport'
     assert.match(source, /aspect-ratio:\s*9\s*\/\s*19\.5/);
     assert.match(source, /\.st-gfx-phone-rows[^}]*min-height:\s*0[^}]*overflow-y:\s*auto/s);
     assert.match(source, /width:\s*min\(18rem, 100%, calc\(46\.1538dvh - 2\.54rem\)\)/);
+});
+
+test('the local stylesheet has a distinct shell for every non-phone media kind', async () => {
+    const source = await readFile(new URL('../style.css', import.meta.url), 'utf8');
+    for (const kind of ['terminal', 'paper', 'map', 'notice', 'credential', 'transaction', 'web', 'broadcast', 'data', 'image', 'monitor', 'media']) {
+        assert.match(source, new RegExp(`\\.st-gfx-(?:card\\.)?st-gfx-kind-${kind}|\\.st-gfx-kind-${kind}`), kind);
+    }
+    assert.match(source, /\.st-gfx-card:not\(\.st-gfx-kind-phone\)[^}]*max-height:[^}]+/s);
+    assert.match(source, /\.st-gfx-card:not\(\.st-gfx-kind-phone\) \.st-gfx-rows[^}]*overflow-y:\s*auto/s);
+    assert.match(source, /st-gfx-row-role-warning/);
 });

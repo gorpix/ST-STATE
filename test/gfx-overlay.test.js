@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { GfxOverlay, calculateGfxDuration, createGfxOverlay } from '../src/gfx-overlay.js';
+import { GFX_MEDIA_KINDS, parseGfxProtocol } from '../src/gfx.js';
 
 class FakeClassList {
     constructor() { this.values = new Set(); }
@@ -54,6 +55,9 @@ test('renders a public artifact as text-only accessible card', () => {
     assert.equal(overlay.root.attributes['aria-live'], 'polite');
     assert.equal(card.attributes.role, 'group');
     assert.equal(card.attributes['aria-live'], undefined);
+    const rows = card.children.find((node) => node.className.includes('st-gfx-rows'));
+    assert.equal(rows.attributes.tabindex, '0');
+    assert.equal(rows.attributes['aria-label'], '<b>Letter</b> content');
     assert.match(card.textContent, /<b>Letter<\/b>/);
     assert.match(card.textContent, /<i>Do not open\.<\/i>/);
     assert.equal(card.innerHTML, undefined);
@@ -135,4 +139,22 @@ test('disabled and non-public events never render; branch identity can auto-clea
     overlay.show({ id: 'b', branchId: 'two', kind: 'phone', platform: 'ios', title: 'B', rows: ['b'] });
     assert.equal(overlay.cards.size, 1);
     assert.equal(overlay.cards.has('a'), false);
+});
+
+test('every canonical protocol kind completes the parse-to-overlay path', () => {
+    for (const kind of GFX_MEDIA_KINDS) {
+        const documentRef = documentFixture();
+        const overlay = new GfxOverlay({ document: documentRef, duration: 0 });
+        const phoneFields = kind === 'phone' ? '\nplatform=android\nlayout=notification' : '';
+        const rows = Array.from({ length: 16 }, (_, index) => `row|${index === 15 ? 'warning' : 'item'}|Field ${index + 1}||Value ${index + 1}`).join('\n');
+        const parsed = parseGfxProtocol('', `V1\nkind=${kind}\nmode=NORMAL\nvisibility=visible${phoneFields}\ntitle=${kind} preview\n${rows}`);
+        assert.equal(parsed.ok, true, `${kind}: ${parsed.errors.join('; ')}`);
+        const card = overlay.show(parsed.event);
+        assert.ok(card, kind);
+        assert.equal(card.classList.contains(`st-gfx-kind-${kind}`), true, kind);
+        const frame = kind === 'phone' ? card.children[0] : card;
+        const list = frame.children.find((node) => node.className.includes('st-gfx-rows'));
+        assert.equal(list.children.length, 16, kind);
+        assert.equal(list.children[15].classList.contains('st-gfx-row-role-warning'), true, kind);
+    }
 });

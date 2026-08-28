@@ -2,7 +2,7 @@ import { HostAdapter } from './adapter.js';
 import { ChatStore } from './store.js';
 import { preserveCanonicalBookkeeping, recordControlMetadata, STStateEngine } from './engine.js';
 import { DiagnosticLog } from './diagnostics.js';
-import { mountSettingsUI, renderDiagnosticEvents, renderReadOnlyDashboard } from './ui.js';
+import { mountSettingsUI, renderDiagnosticEvents, renderReadOnlyDashboard, renderShadowParity } from './ui.js';
 import { stableMessageIdentity } from './identity.js';
 import { extractHiddenPatch, messageText, removeControlPayload, stripMessageControlPayload } from './patch.js';
 import { CHAT_CONFIG_KEY, DEFAULT_ENGINE_MODE, ENGINE_MODES, SETTINGS_KEY, ensureGlobalSettings, getChatMode, getGlobalDefaultMode, normalizeEngineMode, setChatMode, setGlobalDefaultMode } from './modes.js';
@@ -11,7 +11,7 @@ import { importLegacyState } from './legacy.js';
 import { BRANCH_SIDECAR_KEY, checkpointAssistantSlot, createBranchLedger, invalidateAssistantDelete, invalidateAssistantEdit, latestAssistantCheckpoint, prepareSwipeEvaluation, registerAssistantSwipe, stableSwipeIdentity } from './branch.js';
 import { EXTENSION_KEY } from './schema.js';
 import { SHADOW_SIDECAR_KEY } from './modes.js';
-import { extractGfxProtocol, removeGfxControl } from './gfx.js';
+import { extractGfxProtocol, GFX_MEDIA_KINDS, removeGfxControl } from './gfx.js';
 import { createGfxOverlay } from './gfx-overlay.js';
 
 export const runtimeState = {
@@ -133,6 +133,19 @@ function cacheGfxEvent(message, identity, event) {
     for (const key of keys.slice(0, Math.max(0, keys.length - MAX_GFX_CACHE_ENTRIES))) delete cache[key];
 }
 
+function clearGfxCache(message, identity = undefined) {
+    const cache = gfxCache(message);
+    if (!cache) return false;
+    if (identity !== undefined) {
+        if (!Object.prototype.hasOwnProperty.call(cache, identity)) return false;
+        delete cache[identity];
+        if (!Object.keys(cache).length) delete message.extra[GFX_CACHE_KEY];
+        return true;
+    }
+    delete message.extra[GFX_CACHE_KEY];
+    return true;
+}
+
 function setMessageText(message, value) {
     if (Object.prototype.hasOwnProperty.call(message, 'mes')) message.mes = value;
     else if (Object.prototype.hasOwnProperty.call(message, 'message')) message.message = value;
@@ -177,7 +190,10 @@ export async function renderLocalGfx(message, index, { expectedChatId = undefine
     const extracted = extractGfxProtocol(target.pending ? '' : target.text);
     let event = extracted.events?.[0] ?? null;
     const cache = gfxCache(message);
-    if (!event && cache?.[options.swipeIdentity]) event = deepClone(cache[options.swipeIdentity]);
+    // Cached events are only a replay aid after a valid control was stripped.
+    // A new, malformed, or dangling control is authoritative and must never
+    // resurrect the prior artifact for an otherwise identical swipe.
+    if (!event && !extracted.controlBearing && cache?.[options.swipeIdentity]) event = deepClone(cache[options.swipeIdentity]);
     if (extracted.controlBearing) {
         if (!sameChat(adapter, targetChatId)) return { status: 'chat_changed' };
         const rollbackText = messageText(message);
@@ -185,6 +201,7 @@ export async function renderLocalGfx(message, index, { expectedChatId = undefine
         const hadExtra = Object.prototype.hasOwnProperty.call(message, 'extra');
         const rollbackExtra = hadExtra && message.extra && typeof message.extra === 'object'
             ? deepClone(message.extra) : null;
+        clearGfxCache(message, options.swipeIdentity);
         stripSelectedGfxControl(message, options.swipeIndex);
         if (event) cacheGfxEvent(message, options.swipeIdentity, event);
         // ST-STATE's engine persists its own cleanup before this presentation
@@ -277,6 +294,7 @@ function refreshUI() {
     try {
         renderReadOnlyDashboard(runtimeState.ui.dashboard, runtimeState.store.load());
         renderDiagnosticEvents(runtimeState.ui.diagnosticEvents, runtimeState.engine?.diagnostics?.list?.() ?? []);
+        renderShadowParity(runtimeState.ui.parity, runtimeState.store.getShadowReport?.());
     } catch { /* diagnostics panel owns host failures */ }
 }
 
@@ -449,6 +467,9 @@ export async function handleMessageEdited(data) {
     const index = eventMessageIndex(data);
     const message = adapter.getChat?.()?.[index];
     if (!message || typeof message !== 'object') return { status: 'ignored' };
+    // An edit creates new presentation authority. Do not replay an artifact
+    // cached for the message before the user changed it.
+    clearGfxCache(message);
     if (!isAssistantSlot(message)) {
         let ledger = store.loadBranchLedger({ initialize: false });
         const affected = Object.values(ledger.slots ?? {}).filter((slot) => slot.index > index && slot.status !== 'deleted').sort((a, b) => a.index - b.index);
@@ -517,6 +538,9 @@ export async function handleMessageSwipeDeleted(data) {
     runtimeState.gfxOverlay?.clear?.();
     const index = eventMessageIndex(data);
     const message = adapter.getChat?.()?.[index];
+    // Provider swipe ids and indexes can be reassigned after deletion, so the
+    // old per-swipe presentation cache is no longer safe to address.
+    clearGfxCache(message);
     const options = branchOptions(adapter, message, index);
     const ledger = store.loadBranchLedger({ initialize: false });
     const slot = ledger.slots?.[options.slotId];
@@ -569,7 +593,7 @@ function mountUI() {
         setDefaultMode: async (mode) => setGlobalRuntimeMode(mode),
         getGfxSettings: () => ({ enabled: gfxOptions().enabled, durationMs: gfxOptions().duration }),
         setGfxSettings: async (values) => setGfxRuntimeSettings(values),
-        onPreviewGfx: (platform) => previewLocalPhoneGfx(platform),
+        onPreviewGfx: (kind, options) => previewLocalGfx(kind, options),
         getShadowReport: () => runtimeState.store?.getShadowReport?.(),
         getDiagnosticEvents: () => runtimeState.engine?.diagnostics?.list?.() ?? [],
         onRefresh: refreshUI,
@@ -582,6 +606,7 @@ function mountUI() {
         settingsRoot,
         dashboard: settingsRoot.querySelector('.st-dashboard'),
         diagnosticEvents: settingsRoot.querySelector('.st-diagnostic-events'),
+        parity: settingsRoot.querySelector('.st-shadow-parity'),
     };
     if (!runtimeState.ui.dashboard) {
         runtimeState.ui.dashboard = document.createElement('div');
@@ -745,26 +770,51 @@ export async function setGfxRuntimeSettings({ enabled = true, durationMs = 7000 
     return { enabled: record.gfxEnabled, durationMs: record.gfxDurationMs };
 }
 
-export function previewLocalPhoneGfx(platform = 'ios') {
-    const selected = String(platform).toLowerCase() === 'android' ? 'android' : 'ios';
+const GFX_PREVIEW_FIXTURES = Object.freeze({
+    terminal: { title: 'Secure terminal', source: 'Relay', rows: [{ role: 'system', label: 'STATUS', text: 'Connection verified.' }, { role: 'item', label: '>', text: 'Awaiting command.' }] },
+    phone: { title: 'Messages', source: 'Mara', rows: [{ role: 'received', label: 'Mara', text: 'You seeing this?' }, { role: 'sent', label: 'You', text: 'Yeah. Keep the line open.' }] },
+    paper: { title: 'Folded note', source: 'Mara', rows: [{ label: 'Message', text: 'Meet me where the river bends.' }] },
+    map: { title: 'Field map', source: 'Survey desk', rows: [{ label: 'Route', text: 'North bridge → Old mill → Safehouse' }] },
+    notice: { title: 'Public notice', source: 'Civic hall', rows: [{ label: 'Notice', text: 'Curfew begins at sundown.' }] },
+    credential: { title: 'Access credential', source: 'Gate system', rows: [{ label: 'Holder', text: 'Mara Voss' }, { label: 'Clearance', text: 'Level 2' }] },
+    transaction: { title: 'Transaction record', source: 'Ledger', rows: [{ label: 'Amount', text: '12 credits' }, { label: 'Status', text: 'Approved' }] },
+    web: { title: 'Local bulletin', source: 'Public web', rows: [{ label: 'Headline', text: 'Transit resumes after midnight.' }] },
+    broadcast: { title: 'Emergency broadcast', source: 'Channel 7', rows: [{ label: 'Message', text: 'Remain indoors until the all-clear.' }] },
+    data: { title: 'Data readout', source: 'Sensor array', rows: [{ label: 'Signal', text: '86% stable' }, { label: 'Range', text: '400 meters' }] },
+    image: { title: 'Recovered image', source: 'Camera roll', rows: [{ label: 'Caption', text: 'A blurred figure at the east gate.' }] },
+    monitor: { title: 'Monitor status', source: 'Control room', rows: [{ label: 'Temperature', text: '21 C' }, { label: 'Alert', text: 'No active alarms' }] },
+    media: { title: 'Media clip', source: 'Archive', rows: [{ label: 'Transcript', text: 'The recording begins with a door closing.' }] },
+});
+
+export function previewLocalGfx(kind = 'paper', options = {}) {
+    const requested = String(kind ?? '').toLowerCase();
+    const selected = GFX_MEDIA_KINDS.includes(requested) ? requested : 'paper';
     const overlay = ensureGfxOverlay();
     if (!overlay) return null;
+    const fixture = GFX_PREVIEW_FIXTURES[selected] ?? GFX_PREVIEW_FIXTURES.paper;
     const event = {
+        ...deepClone(fixture),
         id: `preview-${selected}-${Date.now()}`,
-        kind: 'phone',
-        platform: selected,
-        layout: 'chat',
+        kind: selected,
         visibility: 'public',
-        title: selected === 'ios' ? 'Messages' : 'Chat',
-        source: selected === 'ios' ? 'Mara' : 'Niko',
-        meta: { time: '09:41', battery: selected === 'ios' ? 'Wi-Fi 87%' : 'LTE 82%' },
-        rows: [
-            { role: 'received', label: selected === 'ios' ? 'Mara' : 'Niko', time: '09:40', text: 'You seeing this?' },
-            { role: 'sent', label: '{{user}}', time: '09:41', text: 'Yeah. Keep the line open.' },
-        ],
+        ...(selected === 'phone' ? {
+            platform: String(options.platform ?? 'ios').toLowerCase() === 'android' ? 'android' : 'ios',
+            layout: options.layout ?? 'chat',
+            title: String(options.platform ?? 'ios').toLowerCase() === 'android' ? 'Chat' : 'Messages',
+            source: String(options.platform ?? 'ios').toLowerCase() === 'android' ? 'Niko' : 'Mara',
+            meta: { time: '09:41', battery: String(options.platform ?? 'ios').toLowerCase() === 'android' ? 'LTE 82%' : 'Wi-Fi 87%' },
+            rows: [
+                { role: 'received', label: String(options.platform ?? 'ios').toLowerCase() === 'android' ? 'Niko' : 'Mara', time: '09:40', text: 'You seeing this?' },
+                { role: 'sent', label: 'You', time: '09:41', text: 'Yeah. Keep the line open.' },
+            ],
+        } : {}),
     };
     overlay.replaceBranch?.(`preview:${selected}:${Date.now()}`, [event]);
     return event;
+}
+
+export function previewLocalPhoneGfx(platform = 'ios') {
+    return previewLocalGfx('phone', { platform });
 }
 
 export async function stStateGenerateInterceptor(chat, _contextSize, _abort, type = 'normal') {

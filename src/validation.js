@@ -50,18 +50,92 @@ function validateTextList(value, path, errors, { maxItems = 20, maxLength = 1000
     return value.map((item, index) => validateText(item, `${path}[${index}]`, errors, { maxLength })).filter(Boolean);
 }
 
+const VAD_COMPONENT_FIELDS = Object.freeze(['valence', 'arousal', 'dominance']);
+const normalizeFieldTerm = (field) => typeof field === 'string' ? field.trim().toLowerCase().replace(/[\s_-]+/g, '') : '';
+const ACTOR_FIELD_ALIASES = new Map(ALLOWLISTED_ACTOR_FIELDS.map((field) => [normalizeFieldTerm(field), field]));
+const SCENE_FIELD_ALIASES = new Map(ALLOWLISTED_SCENE_FIELDS.map((field) => [normalizeFieldTerm(field), field]));
+SCENE_FIELD_ALIASES.set('env', 'environment');
+
+function isLegacyVadField(field) {
+    return normalizeFieldTerm(field) === 'vad';
+}
+
+function canonicalActorField(field) {
+    return isLegacyVadField(field) ? 'vad' : ACTOR_FIELD_ALIASES.get(normalizeFieldTerm(field));
+}
+
+function canonicalSceneField(field) {
+    return SCENE_FIELD_ALIASES.get(normalizeFieldTerm(field));
+}
+
+function prepareFieldEntries(value, resolver, path, errors) {
+    const entries = Object.entries(value).map(([field, fieldValue]) => ({ field, value: fieldValue, canonical: resolver(field) }));
+    const seen = new Map();
+    for (const entry of entries) {
+        if (!entry.canonical) continue;
+        if (seen.has(entry.canonical)) fail(errors, path, `fields "${seen.get(entry.canonical)}" and "${entry.field}" resolve to the same canonical field "${entry.canonical}"`);
+        else seen.set(entry.canonical, entry.field);
+    }
+    return entries;
+}
+
+function normalizeLegacyVad(value, path, errors) {
+    let parts;
+    if (Array.isArray(value)) {
+        parts = value;
+    } else if (typeof value === 'string') {
+        const source = value.trim().replace(/^([\[(])\s*/, '').replace(/\s*([\])])$/, '');
+        const delimited = source.match(/^([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s*([/,|])\s*([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s*\2\s*([+-]?(?:\d+(?:\.\d+)?|\.\d+))$/);
+        const spaced = source.match(/^([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s+([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s+([+-]?(?:\d+(?:\.\d+)?|\.\d+))$/);
+        parts = delimited ? [delimited[1], delimited[3], delimited[4]] : spaced ? spaced.slice(1) : null;
+    } else {
+        parts = null;
+    }
+    if (!parts || parts.length !== VAD_COMPONENT_FIELDS.length) {
+        fail(errors, path, 'legacy vad must contain exactly three numeric valence/arousal/dominance components');
+        return null;
+    }
+    const numbers = parts.map((part) => typeof part === 'number' ? part : (/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/.test(String(part).trim()) ? Number(part) : Number.NaN));
+    if (numbers.some((number) => !Number.isFinite(number) || number < -2 || number > 2)) {
+        fail(errors, path, 'legacy vad components must each be finite numbers from -2 through 2');
+        return null;
+    }
+    return Object.fromEntries(VAD_COMPONENT_FIELDS.map((field, index) => [field, numbers[index]]));
+}
+
+function assignActorField(fields, field, value, path, errors) {
+    const canonicalField = canonicalActorField(field);
+    if (canonicalField === 'vad') {
+        if (VAD_COMPONENT_FIELDS.some((component) => hasOwn(fields, component))) {
+            fail(errors, path, 'legacy vad cannot be combined with valence, arousal, or dominance in the same operation');
+            return;
+        }
+        const normalized = normalizeLegacyVad(value, path, errors);
+        if (normalized) Object.assign(fields, normalized);
+        return;
+    }
+    if (!canonicalField) {
+        fail(errors, path, `field "${field}" is not allowlisted`);
+        return;
+    }
+    const normalized = normalizeActorField(canonicalField, value, path, errors);
+    if (normalized !== undefined) fields[canonicalField] = normalized;
+}
+
 function normalizeActorField(field, value, path, errors) {
     if (!ALLOWLISTED_ACTOR_FIELDS.includes(field)) {
         fail(errors, path, `field "${field}" is not allowlisted`);
         return undefined;
     }
     if (['valence', 'arousal', 'dominance'].includes(field)) {
-        if (typeof value !== 'number' || !Number.isFinite(value) || value < -2 || value > 2) fail(errors, path, 'must be a finite number from -2 through 2');
-        return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+        const number = typeof value === 'number' ? value : (/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/.test(String(value).trim()) ? Number(value) : Number.NaN);
+        if (!Number.isFinite(number) || number < -2 || number > 2) fail(errors, path, 'must be a finite number from -2 through 2');
+        return Number.isFinite(number) ? number : 0;
     }
     if (['agendaStep', 'agendaMax'].includes(field)) {
-        if (!Number.isInteger(value) || value < 0 || value > 100) fail(errors, path, 'must be an integer from 0 through 100');
-        return Number.isInteger(value) ? value : 0;
+        const number = typeof value === 'number' ? value : (/^\d+$/.test(String(value).trim()) ? Number(value) : Number.NaN);
+        if (!Number.isInteger(number) || number < 0 || number > 100) fail(errors, path, 'must be an integer from 0 through 100');
+        return Number.isInteger(number) ? number : 0;
     }
     if (['focus', 'aware', 'fibs', 'circle'].includes(field)) {
         if (Array.isArray(value)) return validateTextList(value, path, errors, { maxItems: 20, maxLength: 1000 });
@@ -98,6 +172,16 @@ function normalizeSceneField(field, value, path, errors) {
     return validateText(value, path, errors, { maxLength: field === 'time' ? 100 : 4000 });
 }
 
+function assignSceneField(fields, field, value, path, errors) {
+    const canonicalField = canonicalSceneField(field);
+    if (!canonicalField) {
+        fail(errors, path, `field "${field}" is not allowlisted`);
+        return;
+    }
+    const normalized = normalizeSceneField(canonicalField, value, path, errors);
+    if (normalized !== undefined) fields[canonicalField] = normalized;
+}
+
 function extractOperationFields(operation, path, allowedKeys, errors) {
     checkKeys(operation, allowedKeys, path, errors);
     const hasSet = hasOwn(operation, 'set') || hasOwn(operation, 'fields');
@@ -127,14 +211,18 @@ function normalizeOperation(operation, index, knownActors, errors) {
         if (isValidActorId(operation.id) && !knownActors.has(operation.id)) fail(errors, `${path}.id`, 'actor does not exist in the base state or an earlier actor.create');
         const fields = {};
         if (hasSet && isPlainObject(setValue)) {
-            for (const [field, value] of Object.entries(setValue)) {
-                const normalized = normalizeActorField(field, value, `${path}.set.${field}`, errors);
-                if (normalized !== undefined) fields[field] = normalized;
+            const entries = prepareFieldEntries(setValue, canonicalActorField, path, errors);
+            const hasLegacyVad = entries.some((entry) => entry.canonical === 'vad');
+            if (hasLegacyVad && entries.some((entry) => VAD_COMPONENT_FIELDS.includes(entry.canonical))) {
+                fail(errors, path, 'legacy vad cannot be combined with valence, arousal, or dominance in the same operation');
+            }
+            for (const entry of entries) {
+                if (hasLegacyVad && VAD_COMPONENT_FIELDS.includes(entry.canonical)) continue;
+                assignActorField(fields, entry.field, entry.value, `${path}.set.${entry.field}`, errors);
             }
         }
         if (hasField) {
-            const normalized = normalizeActorField(operation.field, operation.value, `${path}.value`, errors);
-            if (normalized !== undefined) fields[operation.field] = normalized;
+            assignActorField(fields, operation.field, operation.value, `${path}.value`, errors);
         }
         return { op: operation.op, id: operation.id, set: fields };
     }
@@ -147,10 +235,15 @@ function normalizeOperation(operation, index, knownActors, errors) {
         if (!isPlainObject(actorInput)) fail(errors, `${path}.actor`, 'must be an object');
         const actor = {};
         if (isPlainObject(actorInput)) {
-            for (const key of Object.keys(actorInput)) {
-                if (key === 'id') fail(errors, `${path}.actor.id`, 'actor ID is supplied by the operation');
-                const normalized = normalizeActorField(key, actorInput[key], `${path}.actor.${key}`, errors);
-                if (normalized !== undefined) actor[key] = normalized;
+            const entries = prepareFieldEntries(actorInput, canonicalActorField, path, errors);
+            const hasLegacyVad = entries.some((entry) => entry.canonical === 'vad');
+            if (hasLegacyVad && entries.some((entry) => VAD_COMPONENT_FIELDS.includes(entry.canonical))) {
+                fail(errors, path, 'legacy vad cannot be combined with valence, arousal, or dominance in the same operation');
+            }
+            for (const entry of entries) {
+                if (normalizeFieldTerm(entry.field) === 'id') fail(errors, `${path}.actor.${entry.field}`, 'actor ID is supplied by the operation');
+                if (hasLegacyVad && VAD_COMPONENT_FIELDS.includes(entry.canonical)) continue;
+                assignActorField(actor, entry.field, entry.value, `${path}.actor.${entry.field}`, errors);
             }
             if (!hasOwn(actor, 'name') || !actor.name) fail(errors, `${path}.actor.name`, 'is required');
         }
@@ -161,14 +254,13 @@ function normalizeOperation(operation, index, knownActors, errors) {
         const { hasSet, hasField, setValue } = extractOperationFields(operation, path, SCENE_OP_KEYS, errors);
         const set = {};
         if (hasSet && isPlainObject(setValue)) {
-            for (const [field, value] of Object.entries(setValue)) {
-                const normalized = normalizeSceneField(field, value, `${path}.set.${field}`, errors);
-                if (normalized !== undefined) set[field] = normalized;
+            const entries = prepareFieldEntries(setValue, canonicalSceneField, path, errors);
+            for (const entry of entries) {
+                assignSceneField(set, entry.field, entry.value, `${path}.set.${entry.field}`, errors);
             }
         }
         if (hasField) {
-            const normalized = normalizeSceneField(operation.field, operation.value, `${path}.value`, errors);
-            if (normalized !== undefined) set[operation.field] = normalized;
+            assignSceneField(set, operation.field, operation.value, `${path}.value`, errors);
         }
         return { op: operation.op, set };
     }

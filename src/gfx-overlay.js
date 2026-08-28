@@ -301,6 +301,8 @@ export class GfxOverlay {
         if (rows.length) {
             const list = appendText(this.document, frame, 'div', `st-gfx-rows${phone ? ' st-gfx-phone-rows' : ''}`);
             list.setAttribute?.('role', 'list');
+            list.setAttribute?.('tabindex', '0');
+            list.setAttribute?.('aria-label', `${text(heading)} content`);
             rows.forEach((row, index) => {
                 const item = appendRow(this.document, list, row, index);
                 item.setAttribute?.('role', 'listitem');

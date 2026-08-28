@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { HostAdapter } from '../src/adapter.js';
 import { ChatStore } from '../src/store.js';
-import { previewLocalPhoneGfx, runtimeState, setGfxRuntimeSettings, setGlobalRuntimeMode, setRuntimeMode } from '../src/main.js';
+import { previewLocalGfx, previewLocalPhoneGfx, runtimeState, setGfxRuntimeSettings, setGlobalRuntimeMode, setRuntimeMode } from '../src/main.js';
 
 function resetRuntime() {
     runtimeState.adapter = null;
@@ -57,6 +57,23 @@ test('local GFX settings persist, roll back on failure, and both phone previews 
         await assert.rejects(setGfxRuntimeSettings({ enabled: false, durationMs: 5000 }), /gfx settings offline/);
         assert.equal(settings.stState.gfxEnabled, true);
         assert.equal(settings.stState.gfxDurationMs, 10000);
+    } finally { resetRuntime(); }
+});
+
+test('local GFX gallery provides a fixture for every canonical media kind', async () => {
+    const settings = { stState: { gfxEnabled: true, gfxDurationMs: 7000 } };
+    const previews = [];
+    runtimeState.adapter = { getSettings: () => settings };
+    runtimeState.gfxOverlay = { configure: () => {}, replaceBranch: (_branch, events) => previews.push(events[0]) };
+    try {
+        const kinds = ['terminal', 'phone', 'paper', 'map', 'notice', 'credential', 'transaction', 'web', 'broadcast', 'data', 'image', 'monitor', 'media'];
+        for (const kind of kinds) {
+            const event = previewLocalGfx(kind);
+            assert.equal(event.kind, kind);
+            assert.equal(event.visibility, 'public');
+            assert.ok(Array.isArray(event.rows) && event.rows.length > 0);
+        }
+        assert.deepEqual(previews.map((event) => event.kind), kinds);
     } finally { resetRuntime(); }
 });
 

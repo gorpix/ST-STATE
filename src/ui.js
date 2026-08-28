@@ -2,6 +2,7 @@ import { exportLegacyState, importLegacyState } from './legacy.js';
 import { stateSummary } from './schema.js';
 import { deepClone, sanitizePlainText } from './util.js';
 import { ENGINE_MODES, SELECTABLE_MODES, NATIVE_MODE_LOCKED } from './modes.js';
+import { GFX_MEDIA_KINDS } from './gfx.js';
 
 function element(tag, className = '', text = undefined) {
     const node = document.createElement(tag);
@@ -36,6 +37,14 @@ function listContent(items) {
     if (!Array.isArray(items) || items.length === 0) wrapper.append(element('div', 'st-empty', 'None'));
     else for (const item of items) wrapper.append(element('div', 'st-list-item', typeof item === 'string' ? item : stringValue(item)));
     return wrapper;
+}
+
+/** Dispatch gallery selections with one canonical kind argument. */
+export function requestGfxPreview(onPreviewGfx, selection) {
+    if (typeof onPreviewGfx !== 'function') return undefined;
+    const value = String(selection ?? '').toLowerCase();
+    if (value === 'ios' || value === 'android') return onPreviewGfx('phone', { platform: value });
+    return onPreviewGfx(value);
 }
 
 function actorCard(actor, id) {
@@ -241,12 +250,30 @@ export function renderShadowParity(container, report) {
     container.replaceChildren();
     const value = report ?? {};
     const status = value.status || 'not-run';
-    const title = status === 'match' ? 'Parity: match' : status === 'diverged' ? 'Parity: diverged' : 'Parity: not run';
-    container.append(element('h4', '', title));
+    const candidateStatus = value.patch?.status ?? value.patchStatus ?? value.candidateStatus ?? 'not run';
+    const matches = Array.isArray(value.matches) ? value.matches.length : 0;
+    const divergences = Array.isArray(value.mismatches) ? value.mismatches.length : 0;
+    const canonicalCt = value.canonical?.ct ?? value.authoritativeCt;
+    const successful = status === 'match' && candidateStatus === 'committed' && divergences === 0;
+    const stateClass = successful ? 'st-parity-success' : status === 'diverged' || status === 'not_comparable' ? 'st-parity-warning' : 'st-parity-idle';
+    const title = successful
+        ? `✓ SHADOW SUCCESS${Number.isInteger(canonicalCt) ? ` — ct ${canonicalCt}` : ''}`
+        : status === 'diverged' ? '⚠ SHADOW DIVERGED'
+            : status === 'not_comparable' ? '⚠ SHADOW NOT COMPARABLE'
+                : 'Shadow parity not run';
+    const summary = successful
+        ? `Candidate committed; ${matches} claimed paths matched with zero divergences.`
+        : status === 'diverged' ? `${divergences} claimed path${divergences === 1 ? '' : 's'} diverged from authoritative legacy state.`
+            : status === 'not_comparable' ? `Canonical legacy may have advanced, but the candidate was ${candidateStatus}.`
+                : 'No candidate comparison has been recorded for the current branch action.';
+    container.className = `st-shadow-parity ${stateClass}`;
+    container.setAttribute('role', 'status');
+    container.setAttribute('aria-live', 'polite');
+    container.append(element('div', 'st-parity-result', title), element('div', 'st-parity-summary', summary));
     appendLabelValue(container, 'Supported', (value.supportedRoots ?? ['ct', 'actors', 'scene']).join(', '));
-    appendLabelValue(container, 'Matches', Array.isArray(value.matches) ? value.matches.length : 0);
-    appendLabelValue(container, 'Divergences', Array.isArray(value.mismatches) ? value.mismatches.length : 0);
-    appendLabelValue(container, 'Candidate', value.patch?.status ?? value.patchStatus ?? value.candidateStatus ?? 'not run');
+    appendLabelValue(container, 'Matches', matches);
+    appendLabelValue(container, 'Divergences', divergences);
+    appendLabelValue(container, 'Candidate', candidateStatus);
     if (Array.isArray(value.patch?.errors) && value.patch.errors.length) appendLabelValue(container, 'Candidate errors', value.patch.errors.join('; '));
     appendLabelValue(container, 'Unsupported', (value.unsupportedDomains ?? value.unsupported ?? []).join(', ') || 'None');
     if (Array.isArray(value.mismatches)) for (const mismatch of value.mismatches.slice(0, 20)) appendLabelValue(container, mismatch.path, `${stringValue(mismatch.expected)} → ${stringValue(mismatch.actual)}`);
@@ -308,9 +335,15 @@ export function mountSettingsUI({ host, store, getMode = () => 'LEGACY', setMode
     }
     gfxDuration.value = String(getGfxSettings().durationMs ?? 7000);
     gfxDurationLabel.append(gfxDuration);
+    const gfxKindLabel = element('label', 'st-mode-label', 'Preview kind');
+    const gfxKind = element('select'); gfxKind.setAttribute('aria-label', 'Local GFX preview kind');
+    for (const kind of GFX_MEDIA_KINDS) {
+        const option = element('option', '', kind); option.value = kind; gfxKind.append(option);
+    }
+    const previewSelected = element('button', 'menu_button', 'Preview selected GFX'); previewSelected.type = 'button';
     const previewIos = element('button', 'menu_button', 'Preview iPhone-like'); previewIos.type = 'button';
     const previewAndroid = element('button', 'menu_button', 'Preview Android-like'); previewAndroid.type = 'button';
-    gfxControls.append(gfxEnabledLabel, gfxDurationLabel, previewIos, previewAndroid);
+    gfxControls.append(gfxEnabledLabel, gfxDurationLabel, gfxKindLabel, gfxKind, previewSelected, previewIos, previewAndroid);
     const diagnostics = element('div', 'st-capability-diagnostics');
     const diagnosticEvents = element('div', 'st-diagnostic-events');
     const parity = element('div', 'st-shadow-parity');
@@ -353,8 +386,9 @@ export function mountSettingsUI({ host, store, getMode = () => 'LEGACY', setMode
     };
     gfxEnabled.addEventListener('change', saveGfxSettings);
     gfxDuration.addEventListener('change', saveGfxSettings);
-    previewIos.addEventListener('click', () => onPreviewGfx('ios'));
-    previewAndroid.addEventListener('click', () => onPreviewGfx('android'));
+    previewSelected.addEventListener('click', () => requestGfxPreview(onPreviewGfx, gfxKind.value));
+    previewIos.addEventListener('click', () => requestGfxPreview(onPreviewGfx, 'ios'));
+    previewAndroid.addEventListener('click', () => requestGfxPreview(onPreviewGfx, 'android'));
     backup.addEventListener('click', () => downloadText('st-state-backup.json', store.recoveryBackup?.() ?? store.backup()));
     legacy.addEventListener('click', () => downloadText('st-internal-states.html', exportLegacyState(store.load()), 'text/html'));
     importLatest.addEventListener('click', async () => {

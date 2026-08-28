@@ -130,10 +130,12 @@ test('edit and delete events rebaseline or roll back from the retained checkpoin
         const editedState = stateAt(1, 'edited branch');
         message.mes = reply(editedState, initial.head, 'edited');
         message.swipes[0] = message.mes;
+        message.extra.stStateGfx = { stale: { kind: 'paper' } };
         const edited = await handleMessageEdited(1);
         assert.equal(edited.status, 'edit_rebaseline');
         assert.equal(store.load().scene.openBeat, 'edited branch');
         assert.doesNotMatch(message.mes, /ST_PATCH/);
+        assert.equal(message.extra.stStateGfx, undefined);
 
         context.chat.splice(1, 1);
         const deleted = await handleMessageDeleted(1);
@@ -251,8 +253,10 @@ test('deleting a swipe rebuilds stable identities for shifted remaining ordinals
         message.swipe_info.splice(0, 1);
         message.swipe_id = 0;
         message.mes = message.swipes[0];
+        message.extra.stStateGfx = { stale: { kind: 'phone' } };
         const rebuilt = await handleMessageSwipeDeleted({ messageId: 1, swipeId: 0, newSwipeId: 0 });
         assert.equal(rebuilt.status, 'swipe_reindexed');
+        assert.equal(message.extra.stStateGfx, undefined);
         const keys = Object.keys(store.loadBranchLedger().slots['slot:chat:1'].swipes);
         assert.equal(keys.length, 1);
         assert.match(keys[0], /id:swipe-b$/);

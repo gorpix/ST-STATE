@@ -71,6 +71,15 @@ test('bounds fields and rejects invalid phone variants', () => {
     assert.match(result.errors.join('; '), /GFX line exceeds maximum length/);
 });
 
+test('rejects phone-only fields on non-phone artifacts and unknown phone layouts', () => {
+    const nonPhone = parseGfxProtocol('', 'V1\nkind=paper\nmode=NORMAL\nvisibility=visible\nplatform=ios\ntitle=Note\nrow=Hello');
+    const phone = parseGfxProtocol('', 'V1\nkind=phone\nmode=NORMAL\nvisibility=visible\nlayout=grid\ntitle=Chat\nrow=Hello');
+    assert.equal(nonPhone.ok, false);
+    assert.match(nonPhone.errors.join('; '), /Invalid GFX phone platform/);
+    assert.equal(phone.ok, false);
+    assert.match(phone.errors.join('; '), /Invalid GFX phone layout/);
+});
+
 test('supported media kinds are explicit', () => {
     assert.deepEqual(GFX_MEDIA_KINDS.includes('phone'), true);
     assert.equal(GFX_MEDIA_KINDS.includes('html'), false);
