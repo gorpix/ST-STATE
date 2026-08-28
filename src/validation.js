@@ -150,7 +150,28 @@ function normalizeActorField(field, value, path, errors) {
     return validateText(value, path, errors, { maxLength: field === 'name' || field === 'displayName' ? 200 : 2000 });
 }
 
-function normalizeSceneField(field, value, path, errors) {
+function normalizeLegacyPositionString(value, state, path, errors) {
+    const actors = Object.entries(state?.actors ?? {});
+    const labels = actors.flatMap(([id, actor]) => [id, actor?.name, actor?.displayName]
+        .filter(Boolean).map((label) => ({ id, label: String(label).trim() })))
+        .sort((left, right) => right.label.length - left.label.length);
+    const result = {};
+    for (const rawPart of String(value).split(/[;\n]+/)) {
+        const part = sanitizePlainText(rawPart, { maxLength: 1000, preserveNewlines: false }).trim();
+        if (!part) continue;
+        const explicit = part.match(/^(.+?)\s*[:=]\s*(.+)$/);
+        const known = explicit
+            ? labels.find(({ label }) => label.toLowerCase() === explicit[1].trim().toLowerCase())
+            : labels.find(({ label }) => part.toLowerCase().startsWith(`${label.toLowerCase()} `));
+        if (!known) continue;
+        const position = explicit ? explicit[2].trim() : part.slice(known.label.length).trim().replace(/^[-–—:=>]+\s*/, '');
+        if (position) result[known.id] = validateText(position, `${path}.${known.id}`, errors, { maxLength: 500 });
+    }
+    if (!Object.keys(result).length) fail(errors, path, 'legacy position text must begin with at least one known actor name or ID');
+    return result;
+}
+
+function normalizeSceneField(field, value, path, errors, state = null) {
     if (!ALLOWLISTED_SCENE_FIELDS.includes(field)) {
         fail(errors, path, `field "${field}" is not allowlisted`);
         return undefined;
@@ -160,6 +181,7 @@ function normalizeSceneField(field, value, path, errors) {
         return validateText(value, path, errors, { maxLength: 200 });
     }
     if (field === 'positions') {
+        if (typeof value === 'string') return normalizeLegacyPositionString(value, state, path, errors);
         if (!isPlainObject(value)) {
             fail(errors, path, 'must be an object keyed by two-letter actor IDs');
             return {};
@@ -174,13 +196,13 @@ function normalizeSceneField(field, value, path, errors) {
     return validateText(value, path, errors, { maxLength: field === 'time' ? 100 : 4000 });
 }
 
-function assignSceneField(fields, field, value, path, errors) {
+function assignSceneField(fields, field, value, path, errors, state = null) {
     const canonicalField = canonicalSceneField(field);
     if (!canonicalField) {
         fail(errors, path, `field "${field}" is not allowlisted`);
         return;
     }
-    const normalized = normalizeSceneField(canonicalField, value, path, errors);
+    const normalized = normalizeSceneField(canonicalField, value, path, errors, state);
     if (normalized !== undefined) fields[canonicalField] = normalized;
 }
 
@@ -213,7 +235,7 @@ function extractOperationFields(operation, path, allowedKeys, errors) {
     return { hasSet, hasField, setValue };
 }
 
-function normalizeOperation(operation, index, knownActors, errors) {
+function normalizeOperation(operation, index, knownActors, errors, state = null) {
     const path = `ops[${index}]`;
     if (!isPlainObject(operation)) {
         fail(errors, path, 'must be an object');
@@ -274,11 +296,11 @@ function normalizeOperation(operation, index, knownActors, errors) {
         if (hasSet && isPlainObject(setValue)) {
             const entries = prepareFieldEntries(setValue, canonicalSceneField, path, errors);
             for (const entry of entries) {
-                assignSceneField(set, entry.field, entry.value, `${path}.set.${entry.field}`, errors);
+                assignSceneField(set, entry.field, entry.value, `${path}.set.${entry.field}`, errors, state);
             }
         }
         if (hasField) {
-            assignSceneField(set, operation.field, operation.value, `${path}.value`, errors);
+            assignSceneField(set, operation.field, operation.value, `${path}.value`, errors, state);
         }
         return { op: operation.op, set };
     }
@@ -325,7 +347,7 @@ export function validatePatchEnvelope(input, { state = null } = {}) {
     const operations = [];
     if (Array.isArray(patch.ops)) {
         for (let index = 0; index < patch.ops.length; index += 1) {
-            const normalized = normalizeOperation(patch.ops[index], index, knownActors, errors);
+            const normalized = normalizeOperation(patch.ops[index], index, knownActors, errors, state);
             if (normalized) operations.push(normalized);
         }
     }

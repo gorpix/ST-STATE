@@ -66,6 +66,12 @@ test('all supported legacy actor and scene labels normalize to canonical fields'
         spotlight: 'Alice', openBeat: 'The latch turns', timePressure: 'None', environment: 'Rain against the windows',
         positions: { AL: 'window' }, time: '22:00',
     });
+
+    const legacyPositions = validatePatchEnvelope({ version: 2, base: before.head, mode: 'NORMAL', ops: [
+        { op: 'scene.set', set: { Positions: 'User beside Alice; Alice at the window; loose coat on floor' } },
+    ] }, { state: before });
+    assert.equal(legacyPositions.ok, true);
+    assert.deepEqual(legacyPositions.value.ops[0].set.positions, { US: 'beside Alice', AL: 'at the window' });
 });
 
 test('legacy vad compatibility remains strict and unambiguous', () => {
@@ -134,6 +140,20 @@ test('relation updates validate ranges and commit atomically', () => {
     const unknownActor = validatePatchEnvelope({ ...patch, ops: [{ op: 'relation.set', a: 'US', b: 'ZZ', field: 'bond', value: 1 }] }, { state: before });
     assert.equal(unknownActor.ok, false);
     assert.ok(unknownActor.errors.some((error) => /actor does not exist/.test(error)));
+});
+
+test('legacy prose scene positions resolve known names and ignore object clauses', () => {
+    const before = state();
+    before.actors.US.name = 'Janko';
+    before.actors.NI = { id: 'NI', name: 'Nick' };
+    const result = validatePatchEnvelope({ version: 2, base: before.head, mode: 'NORMAL', ops: [
+        { op: 'scene.set', set: { positions: "Janko pressed to Nick's side by the monitor box, paw on his ass; Nick shirtless, arm around Janko's neck; tank top on floor; Richard the Great on desk" } },
+    ] }, { state: before });
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.value.ops[0].set.positions, {
+        US: "pressed to Nick's side by the monitor box, paw on his ass",
+        NI: "shirtless, arm around Janko's neck",
+    });
 });
 
 test('stale base and duplicate transaction do not mutate state', () => {
