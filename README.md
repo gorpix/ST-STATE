@@ -9,7 +9,7 @@ This release is an evaluative Shadow build with presentation-only local GFX. `LE
 - ST-STATE will become the required engine shipped with ST-ENDGAME; preset and extension are being developed separately only during the near-term transition.
 - ST-FLASH will be absorbed into ST-STATE by **ST-STATE v1.0**.
 - ST-STATE and ST-FLASH will be fully integrated into ST-ENDGAME by **ST-ENDGAME v1.0**, leaving one preset distribution with its required extension.
-- TODO after the local renderer: persistent in-world phone contacts and offscreen NPC text/call threads, with unread state and branch-safe conversation history.
+- TODO after the local renderer: persistent in-world phone contacts and offscreen NPC text/call threads powered by FLASH, with unread state and branch-safe conversation history.
 
 ## Scope (Evaluative 0.4)
 
