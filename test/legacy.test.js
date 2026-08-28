@@ -93,6 +93,60 @@ test('strict import accepts an omitted optional World Sim and preserves prior op
     assert.equal(imported.state.opaque.legacy.worldSimRaw, base.opaque.legacy.worldSimRaw);
 });
 
+test('manual recovery import preserves missing legacy domains while strict Shadow still rejects them', () => {
+    const base = importLegacyState(fixture, { now: 1 }).state;
+    base.residue[0].aftereffect = 'preserved aftereffect';
+    base.thoughts[0].thoughts = 'preserved thought';
+    const partial = fixture
+        .replace(/<details><summary>🧩 EMOTIONAL RESIDUE<\/summary>[\s\S]*?<\/details>\s*/i, '')
+        .replace(/<details><summary>🧠 INTERNAL THOUGHTS<\/summary>[\s\S]*?<\/details>\s*/i, '')
+        .replace(/<details><summary>[^<]*FACTIONS<\/summary>[\s\S]*?<\/details>\s*/i, '');
+    const recovered = importLegacyState(partial, {
+        now: 2,
+        baseState: base,
+        preserveMissingFromBase: true,
+        requireTurn: true,
+    });
+    assert.equal(recovered.ok, true);
+    assert.equal(recovered.complete, false);
+    assert.deepEqual(recovered.missingSections, ['FACTIONS', 'EMOTIONAL RESIDUE', 'INTERNAL THOUGHTS']);
+    assert.equal(recovered.state.residue[0].aftereffect, 'preserved aftereffect');
+    assert.equal(recovered.state.thoughts[0].thoughts, 'preserved thought');
+    assert.equal(recovered.state.factions['Lantern Guild'].goal, base.factions['Lantern Guild'].goal);
+    const strict = importLegacyState(partial, { now: 2, baseState: base, requireComplete: true });
+    assert.equal(strict.ok, false);
+    assert.deepEqual(strict.missingSections, recovered.missingSections);
+});
+
+test('manual recovery import requires a turn header even when missing domains can be preserved', () => {
+    const base = importLegacyState(fixture, { now: 1 }).state;
+    const withoutTurn = fixture.replace(/\s*\(Turn:\s*12\)/i, '');
+    const recovered = importLegacyState(withoutTurn, { baseState: base, preserveMissingFromBase: true, requireTurn: true });
+    assert.equal(recovered.ok, false);
+    assert.deepEqual(recovered.missingSections, ['turn header']);
+});
+
+test('sparse legacy merge preserves omitted records while explicit None clears a section', () => {
+    const base = importLegacyState(fixture, { now: 1 }).state;
+    const sparse = `<!-- GFX_START --><internal_states><details><summary>🎬 INTERNAL STATES (Turn: 13)</summary>
+<details><summary>👥 NPC STATE</summary>- Alice | At: roof | Doing: watching | Agenda: None | VAD: 0/0/0 | Focus: Bob | Aware: roof | Fibs: None | Circle: None | Body: well</details>
+<details><summary>🌍 SCENE & WORLD</summary>- Spotlight: Alice | Open Beat: bell rings | Time Pressure: None<br>- Env: roof | Positions: Alice: roof edge</details>
+</details></internal_states><!-- GFX_END -->`;
+    const merged = importLegacyState(sparse, { baseState: base, preserveMissingFromBase: true, mergeSparseFromBase: true, requireTurn: true });
+    assert.equal(merged.ok, true);
+    assert.equal(merged.state.actors.AL.at, 'roof');
+    assert.equal(merged.state.actors.BO.name, 'Bob');
+    assert.equal(merged.state.scene.positions.AL, 'roof edge');
+    assert.equal(merged.state.scene.positions.BO, 'Lantern Room');
+
+    const clear = sparse
+        .replace(/- Alice \| At:[\s\S]*?Body: well<\/details>/i, '- None</details>')
+        .replace(/Positions: Alice: roof edge/i, 'Positions: None');
+    const cleared = importLegacyState(clear, { baseState: base, preserveMissingFromBase: true, mergeSparseFromBase: true, requireTurn: true });
+    assert.deepEqual(cleared.state.actors, {});
+    assert.deepEqual(cleared.state.scene.positions, {});
+});
+
 test('legacy scene positions accept known actor prefixes without colon delimiters', () => {
     const source = fixture.replace('Positions: Alice: Lantern Room; Bob: Lantern Room', 'Positions: Alice beside the lantern; Bob watching from the doorway');
     const imported = importLegacyState(source, { requireComplete: true });

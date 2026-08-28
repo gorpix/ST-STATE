@@ -71,7 +71,9 @@ export function inspectShadowBaseline(adapter, state, { now = Date.now() } = {})
     const imported = importLegacyState(chatLegacyText(adapter), {
         now,
         baseState: state,
-        requireComplete: true,
+        preserveMissingFromBase: true,
+        mergeSparseFromBase: true,
+        requireTurn: true,
         userName: adapter?.getUserName?.(),
     });
     if (!imported.ok) {
@@ -147,7 +149,7 @@ export class STStateEngine {
         const baseline = inspectShadowBaseline(this.adapter, state, { now: this.now() });
         if (baseline.status === 'missing' || baseline.status === 'incomplete') {
             this.adapter.clearPrompt();
-            this.diagnostics.warn('BASELINE_REQUIRED', 'Import the latest complete legacy state before Shadow prompt injection.');
+            this.diagnostics.warn('BASELINE_REQUIRED', 'Import the latest usable legacy state before Shadow prompt injection.');
             return { injected: false, skipped: true, type: generationType, mode, reason: 'baseline_required', baseline };
         }
         if (baseline.status === 'stale') {
@@ -216,9 +218,9 @@ export class STStateEngine {
             return { ...result, displayText: extracted.prose, extracted };
         }
 
-        const importedResult = importLegacyState(raw, { now: this.now(), baseState: state, requireComplete: true, userName: this.adapter?.getUserName?.() });
+        const importedResult = importLegacyState(raw, { now: this.now(), baseState: state, preserveMissingFromBase: true, mergeSparseFromBase: true, requireTurn: true, userName: this.adapter?.getUserName?.() });
         if (!importedResult.ok) {
-            this.diagnostics.warn('SHADOW_LEGACY_MISSING', 'Shadow mode requires a complete <internal_states> block; canonical state was kept unchanged.', { messageIndex: index });
+            this.diagnostics.warn('SHADOW_LEGACY_MISSING', 'Shadow mode requires a usable <internal_states> block with a turn header; canonical state was kept unchanged.', { messageIndex: index });
             const result = { status: 'missing_legacy', mode: 'SHADOW', state, displayText: extracted.found ? extracted.prose : raw, extracted, persisted: false };
             recordControlMetadata(message, extracted, result, this.now());
             if (extracted.controlBearing) {
@@ -229,6 +231,7 @@ export class STStateEngine {
         }
 
         const authoritative = preserveCanonicalBookkeeping(importedResult.state, state);
+        if (!importedResult.complete) this.diagnostics.info('SHADOW_LEGACY_PARTIAL', `Accepted partial legacy turn and preserved ${importedResult.missingSections.length} missing sections.`, { messageIndex: index, missingSections: importedResult.missingSections });
         const hasBaseline = hasCanonicalBaseline(state);
         if (hasBaseline && authoritative.ct !== state.ct + 1) {
             const parity = compareShadowParity(authoritative, null, { patchStatus: extracted.found ? (extracted.ok ? 'not_evaluated' : 'malformed') : 'missing', at: this.now() });
@@ -268,7 +271,13 @@ export class STStateEngine {
             at: this.now(),
         });
         sidecar.previous = { ct: state.ct, head: state.head };
-        sidecar.legacy = { status: hasBaseline ? 'accepted' : 'baseline', ct: authoritative.ct, head: authoritative.head };
+        sidecar.legacy = {
+            status: hasBaseline ? (importedResult.complete ? 'accepted' : 'partial_accepted') : 'baseline',
+            ct: authoritative.ct,
+            head: authoritative.head,
+            complete: importedResult.complete,
+            missingSections: deepClone(importedResult.missingSections ?? []),
+        };
         sidecar.patch = { status: result.status, base: extracted.patch?.base ?? null, tx: extracted.patch?.tx ?? null, opsCount: extracted.patch?.ops?.length ?? 0, errors: deepClone(result.errors ?? []) };
         sidecar.canonical = { source: 'legacy', persisted: false, ct: authoritative.ct, head: authoritative.head };
         sidecar.recoveryBackup = typeof this.store.recoveryBackup === 'function' ? this.store.recoveryBackup({ state }) : null;

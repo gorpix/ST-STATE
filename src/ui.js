@@ -209,6 +209,7 @@ export function renderImportPreview(container, preview, { title = 'Import previe
     appendLabelValue(container, 'Changed', preview.changed ? 'yes' : 'no');
     appendLabelValue(container, 'Current digest', preview.currentDigest || 'unknown');
     appendLabelValue(container, 'Imported digest', preview.importedDigest || 'unknown');
+    if (preview.missingSections?.length) appendLabelValue(container, 'Preserved missing sections', preview.missingSections.join(', '));
     const diff = preview.diff;
     if (diff?.forward) appendLabelValue(container, 'Changed paths', diff.forward.map((item) => item.path).join(', ') || 'None');
     return container;
@@ -394,8 +395,8 @@ export function mountSettingsUI({ host, store, getMode = () => 'LEGACY', setMode
     importLatest.addEventListener('click', async () => {
         try {
             const chatText = (host?.getChat?.() ?? []).map((message) => message?.mes ?? message?.message ?? message?.content ?? '').join('\n');
-            const imported = importLegacyState(chatText, { now: Date.now(), baseState: store.load(), requireComplete: true, userName: host?.getUserName?.() });
-            if (!imported.ok) throw new Error(imported.diagnostics?.join('; ') || 'No complete <internal_states> block was found');
+            const imported = importLegacyState(chatText, { now: Date.now(), baseState: store.load(), preserveMissingFromBase: true, mergeSparseFromBase: true, requireTurn: true, userName: host?.getUserName?.() });
+            if (!imported.ok) throw new Error(imported.diagnostics?.join('; ') || 'No usable <internal_states> block was found');
             const current = store.load();
             const backupDocument = {
                 extension: 'stState',
@@ -406,9 +407,10 @@ export function mountSettingsUI({ host, store, getMode = () => 'LEGACY', setMode
                 state: current,
                 legacyRaw: imported.block?.wrappedRaw ?? imported.block?.raw ?? '',
             };
-            const parsed = { changed: true, current, imported: imported.state, currentDigest: 'current', importedDigest: imported.digest ?? 'legacy', diff: null, legacy: true };
+            const parsed = { changed: true, current, imported: imported.state, currentDigest: 'current', importedDigest: imported.digest ?? 'legacy', diff: null, legacy: true, missingSections: imported.missingSections };
             renderImportPreview(preview, parsed, { title: 'Latest chat baseline preview' });
-            if (!globalThis.confirm?.('Import the latest complete <internal_states> block as the Shadow baseline? A recovery file will download first.')) return;
+            const preserved = imported.missingSections?.length ? ` Missing sections will be preserved from the current baseline: ${imported.missingSections.join(', ')}.` : '';
+            if (!globalThis.confirm?.(`Import the latest <internal_states> block as the Shadow baseline?${preserved} A recovery file will download first.`)) return;
             downloadText('st-state-pre-shadow-backup.json', JSON.stringify(backupDocument, null, 2));
             const report = {
                 version: 1,
@@ -422,7 +424,8 @@ export function mountSettingsUI({ host, store, getMode = () => 'LEGACY', setMode
             };
             if (typeof store.saveShadowCommit === 'function') await store.saveShadowCommit(imported.state, report, { expectedChatId: host?.getChatId?.() });
             else await store.save(imported.state, { expectedChatId: host?.getChatId?.() });
-            host?.notify?.('success', `Imported Shadow baseline at ct ${imported.state.ct}.`);
+            const partial = imported.complete ? '' : ` Preserved ${imported.missingSections.length} missing sections.`;
+            host?.notify?.('success', `Imported Shadow baseline at ct ${imported.state.ct}.${partial}`);
             refreshAll();
         } catch (error) {
             host?.notify?.('error', `Baseline import rejected: ${sanitizePlainText(error.message)}`);

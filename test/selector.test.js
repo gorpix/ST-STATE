@@ -38,6 +38,8 @@ test('protocol keeps an ordinary zero-delta RP turn NORMAL', () => {
     assert.match(prompt, /Patch transport is line-based, never JSON/);
     assert.match(prompt, /actor\.set\|ID\|field\|value/);
     assert.match(prompt, /copy the value character-for-character/);
+    assert.match(prompt, /Omitted sections and omitted cold actor\/relation\/position rows are carried forward unchanged/);
+    assert.match(prompt, /Include NPC STATE, BONDS, and SCENE & WORLD on every NORMAL turn/);
     assert.doesNotMatch(prompt, /If no NORMAL semantic change is known, use mode OOC or FLASH/);
 });
 

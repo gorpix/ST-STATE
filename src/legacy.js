@@ -91,6 +91,27 @@ function removeBullet(value) {
     return String(value ?? '').replace(/^\s*[-•*]\s*/, '').trim();
 }
 
+function sectionExplicitlyEmpty(section) {
+    if (!section) return false;
+    const rows = rowsFromHtml(section.content ?? '').map(removeBullet);
+    return rows.length === 0 || rows.every((line) => /^none$/i.test(line));
+}
+
+function mergeSparseList(previous, current, keyFor) {
+    const claimed = new Set(current.map(keyFor).filter(Boolean));
+    return [
+        ...previous.filter((item) => {
+            const key = keyFor(item);
+            return key && !claimed.has(key);
+        }),
+        ...current,
+    ];
+}
+
+function legacyListKey(value) {
+    return sanitizePlainText(value, { maxLength: 200, preserveNewlines: false }).normalize('NFKC').toLowerCase();
+}
+
 function parseLabelFields(line) {
     const parts = splitPipeFields(removeBullet(line));
     const first = parts.shift() ?? '';
@@ -346,7 +367,11 @@ function parseSceneSection(state, section, diagnostics, userName = '') {
         if (hasOwn(fields, 'Open Beat')) state.scene.openBeat = parseValueOrNone(fields['Open Beat']);
         if (hasOwn(fields, 'Time Pressure')) state.scene.timePressure = parseValueOrNone(fields['Time Pressure']);
         if (hasOwn(fields, 'Env')) state.scene.environment = parseValueOrNone(fields.Env);
-        if (hasOwn(fields, 'Positions')) state.scene.positionsRaw = parseValueOrNone(fields.Positions);
+        if (hasOwn(fields, 'Positions')) {
+            const positions = parseValueOrNone(fields.Positions);
+            if (/^none$/i.test(positions)) state.scene.positions = {};
+            else state.scene.positionsRaw = positions;
+        }
     }
     if (state.scene.positionsRaw) {
         const pairs = state.scene.positionsRaw.split(/[,;]+/);
@@ -377,6 +402,7 @@ function mergeOpaqueRaw(state, sectionName, lines) {
 export function importLegacyState(input, options = {}) {
     const block = extractLatestInternalStates(input);
     if (!block.ok) return { ok: false, state: migrateState(options.baseState), diagnostics: [block.reason], block };
+    const baseState = options.baseState ? migrateState(options.baseState, { now: options.now }) : null;
     // A complete legacy block is authoritative. Start with a fresh document so
     // a missing/empty section cannot accidentally retain stale values from a
     // previous chat state; actor IDs remain deterministic from their labels.
@@ -402,38 +428,79 @@ export function importLegacyState(input, options = {}) {
     const known = new Set();
     const mark = (pattern) => { const node = directSection(outer, pattern); if (node) known.add(node); return node; };
 
-    const npcDiagnostics = { unparsed: [] }; const npc = mark(/NPC\s+STATE/i); parseActorSection(state, npc, npcDiagnostics, options.userName); mergeOpaqueRaw(state, 'NPC STATE', npcDiagnostics.unparsed);
-    const factionDiagnostics = { unparsed: [] }; const factions = mark(/FACTIONS/i); parseFactionSection(state, factions, factionDiagnostics); mergeOpaqueRaw(state, 'FACTIONS', factionDiagnostics.unparsed);
-    const bondsDiagnostics = { unparsed: [] }; const bonds = mark(/BONDS|BOND\s+TRACKER/i); if (bonds) { parseRelationshipRows(state, bonds.content, bondsDiagnostics, options.userName); parseProfileRows(state, bonds.content, bondsDiagnostics, options.userName); } mergeOpaqueRaw(state, 'BONDS', bondsDiagnostics.unparsed);
-    const residueDiagnostics = { unparsed: [] }; const residue = mark(/EMOTIONAL\s+RESIDUE/i); parseResidueSection(state, residue, residueDiagnostics); mergeOpaqueRaw(state, 'EMOTIONAL RESIDUE', residueDiagnostics.unparsed);
-    const questDiagnostics = { unparsed: [] }; const quests = mark(/QUESTS/i); parseQuestSection(state, quests, questDiagnostics); mergeOpaqueRaw(state, 'QUESTS', questDiagnostics.unparsed);
+    const npcDiagnostics = { unparsed: [] }; const npc = mark(/NPC\s+STATE/i);
+    // Sparse Shadow output contains only the hot actor rows. Seed cold actor
+    // records before parsing so present rows replace matching records while
+    // omitted rows survive. An explicit empty section still clears all actors.
+    if (options.mergeSparseFromBase && baseState && !sectionExplicitlyEmpty(npc)) {
+        state.actors = deepClone(baseState.actors);
+        state.opaque.legacy.actorIds = {
+            ...(baseState.opaque?.legacy?.actorIds ?? {}),
+            ...state.opaque.legacy.actorIds,
+        };
+    }
+    parseActorSection(state, npc, npcDiagnostics, options.userName); mergeOpaqueRaw(state, 'NPC STATE', npcDiagnostics.unparsed);
+    const factionDiagnostics = { unparsed: [] }; const factions = mark(/FACTIONS/i);
+    if (options.mergeSparseFromBase && baseState && !sectionExplicitlyEmpty(factions)) state.factions = deepClone(baseState.factions);
+    parseFactionSection(state, factions, factionDiagnostics); mergeOpaqueRaw(state, 'FACTIONS', factionDiagnostics.unparsed);
+    const bondsDiagnostics = { unparsed: [] }; const bonds = mark(/BONDS|BOND\s+TRACKER/i);
+    if (options.mergeSparseFromBase && baseState && !sectionExplicitlyEmpty(bonds)) state.relations = deepClone(baseState.relations);
+    if (bonds) { parseRelationshipRows(state, bonds.content, bondsDiagnostics, options.userName); parseProfileRows(state, bonds.content, bondsDiagnostics, options.userName); } mergeOpaqueRaw(state, 'BONDS', bondsDiagnostics.unparsed);
+    const residueDiagnostics = { unparsed: [] }; const residue = mark(/EMOTIONAL\s+RESIDUE/i); parseResidueSection(state, residue, residueDiagnostics);
+    if (options.mergeSparseFromBase && baseState && residue && !sectionExplicitlyEmpty(residue)) state.residue = mergeSparseList(baseState.residue, state.residue, (item) => legacyListKey(item?.subject ?? item?.actor ?? item?.name));
+    mergeOpaqueRaw(state, 'EMOTIONAL RESIDUE', residueDiagnostics.unparsed);
+    const questDiagnostics = { unparsed: [] }; const quests = mark(/QUESTS/i); parseQuestSection(state, quests, questDiagnostics);
+    if (options.mergeSparseFromBase && baseState && quests && !sectionExplicitlyEmpty(quests)) state.quests = mergeSparseList(baseState.quests, state.quests, (item) => legacyListKey(item?.title ?? item?.name));
+    mergeOpaqueRaw(state, 'QUESTS', questDiagnostics.unparsed);
     const inventoryDiagnostics = { unparsed: [] }; const inventory = mark(/INV\s*&\s*SKILLS|INVENTORY\s*&\s*STATUS/i); parseInventorySection(state, inventory, inventoryDiagnostics); mergeOpaqueRaw(state, 'INV & SKILLS', inventoryDiagnostics.unparsed);
     const chekhovDiagnostics = { unparsed: [] }; const chekhov = mark(/CHEKHOV/i); parseChekhovSection(state, chekhov, chekhovDiagnostics); mergeOpaqueRaw(state, "CHEKHOV'S GUN", chekhovDiagnostics.unparsed);
-    const thoughtDiagnostics = { unparsed: [] }; const thoughts = mark(/INTERNAL\s+THOUGHTS/i); parseThoughtSection(state, thoughts, thoughtDiagnostics); mergeOpaqueRaw(state, 'INTERNAL THOUGHTS', thoughtDiagnostics.unparsed);
+    const thoughtDiagnostics = { unparsed: [] }; const thoughts = mark(/INTERNAL\s+THOUGHTS/i); parseThoughtSection(state, thoughts, thoughtDiagnostics);
+    if (options.mergeSparseFromBase && baseState && thoughts && !sectionExplicitlyEmpty(thoughts)) state.thoughts = mergeSparseList(baseState.thoughts, state.thoughts, (item) => legacyListKey(item?.actor ?? item?.name ?? item?.subject));
+    mergeOpaqueRaw(state, 'INTERNAL THOUGHTS', thoughtDiagnostics.unparsed);
     const notebookDiagnostics = { unparsed: [] }; const notebook = mark(/GM'?S?\s+NOTEBOOK/i); parseNotebookSection(state, notebook, notebookDiagnostics); mergeOpaqueRaw(state, "GM'S NOTEBOOK", notebookDiagnostics.unparsed);
     const dndDiagnostics = { unparsed: [] }; const dnd = mark(/DND\s+TASK\s+SIM/i); parseDndSection(state, dnd, dndDiagnostics); mergeOpaqueRaw(state, 'DND TASK SIM', dndDiagnostics.unparsed);
-    const sceneDiagnostics = { unparsed: [] }; const scene = mark(/SCENE\s*&\s*WORLD/i); parseSceneSection(state, scene, sceneDiagnostics, options.userName); mergeOpaqueRaw(state, 'SCENE & WORLD', sceneDiagnostics.unparsed);
+    const sceneDiagnostics = { unparsed: [] }; const scene = mark(/SCENE\s*&\s*WORLD/i);
+    if (options.mergeSparseFromBase && baseState && !sectionExplicitlyEmpty(scene)) state.scene = deepClone(baseState.scene);
+    parseSceneSection(state, scene, sceneDiagnostics, options.userName); mergeOpaqueRaw(state, 'SCENE & WORLD', sceneDiagnostics.unparsed);
     const worldSim = mark(/WORLD\s+SIM/i);
     if (worldSim) {
         state.worldSim = { raw: worldSim.raw, data: null };
         state.opaque.legacy.worldSimRaw = worldSim.raw;
-    } else if (options.baseState) {
-        const previous = migrateState(options.baseState, { now: options.now });
-        state.worldSim = deepClone(previous.worldSim);
-        state.opaque.legacy.worldSimRaw = previous.opaque?.legacy?.worldSimRaw ?? '';
+    } else if (baseState) {
+        state.worldSim = deepClone(baseState.worldSim);
+        state.opaque.legacy.worldSimRaw = baseState.opaque?.legacy?.worldSimRaw ?? '';
     }
-    if (options.requireComplete) {
-        const required = [
-            ['turn header', turn], ['NPC STATE', npc], ['FACTIONS', factions], ['BONDS', bonds],
-            ['EMOTIONAL RESIDUE', residue], ['QUESTS', quests], ['INV & SKILLS', inventory],
-            ["CHEKHOV'S GUN", chekhov], ['INTERNAL THOUGHTS', thoughts], ["GM'S NOTEBOOK", notebook],
-            ['DND TASK SIM', dnd], ['SCENE & WORLD', scene],
+    const required = [
+        ['turn header', turn], ['NPC STATE', npc], ['FACTIONS', factions], ['BONDS', bonds],
+        ['EMOTIONAL RESIDUE', residue], ['QUESTS', quests], ['INV & SKILLS', inventory],
+        ["CHEKHOV'S GUN", chekhov], ['INTERNAL THOUGHTS', thoughts], ["GM'S NOTEBOOK", notebook],
+        ['DND TASK SIM', dnd], ['SCENE & WORLD', scene],
+    ];
+    const missingSections = required.filter(([, value]) => !value).map(([name]) => name);
+    if ((options.requireComplete && missingSections.length) || (options.requireTurn && !turn)) {
+        const reason = `Incomplete <internal_states> block; missing ${missingSections.join(', ')}`;
+        return { ok: false, state: migrateState(options.baseState), diagnostics: [reason], block, missingSections };
+    }
+    if (options.preserveMissingFromBase && baseState && missingSections.length) {
+        const carry = [
+            ['FACTIONS', 'factions', 'FACTIONS'],
+            ['BONDS', 'relations', 'BONDS'],
+            ['EMOTIONAL RESIDUE', 'residue', 'EMOTIONAL RESIDUE'],
+            ['QUESTS', 'quests', 'QUESTS'],
+            ['INV & SKILLS', 'inventory', 'INV & SKILLS'],
+            ["CHEKHOV'S GUN", 'chekhov', "CHEKHOV'S GUN"],
+            ['INTERNAL THOUGHTS', 'thoughts', 'INTERNAL THOUGHTS'],
+            ["GM'S NOTEBOOK", 'notebook', "GM'S NOTEBOOK"],
+            ['DND TASK SIM', 'lastDnd', 'DND TASK SIM'],
+            ['SCENE & WORLD', 'scene', 'SCENE & WORLD'],
         ];
-        const missingSections = required.filter(([, value]) => !value).map(([name]) => name);
-        if (missingSections.length) {
-            const reason = `Incomplete <internal_states> block; missing ${missingSections.join(', ')}`;
-            return { ok: false, state: migrateState(options.baseState), diagnostics: [reason], block, missingSections };
+        for (const [sectionName, field, opaqueName] of carry) {
+            if (!missingSections.includes(sectionName)) continue;
+            state[field] = deepClone(baseState[field]);
+            const opaqueLines = baseState.opaque?.legacy?.unparsed?.[opaqueName];
+            if (opaqueLines?.length) state.opaque.legacy.unparsed[opaqueName] = deepClone(opaqueLines);
         }
+        diagnostics.push(`Preserved missing sections from the current baseline: ${missingSections.filter((name) => name !== 'turn header').join(', ')}`);
     }
     const siblingSections = tree.children.includes(outer) ? tree.children.filter((node) => node !== outer) : [];
     for (const node of [...(outer.children ?? []), ...siblingSections]) {
@@ -453,7 +520,7 @@ export function importLegacyState(input, options = {}) {
     }
     state.meta.mode = 'NORMAL';
     state.schemaVersion = 2;
-    return { ok: true, complete: true, state, diagnostics, block, missingSections: [] };
+    return { ok: true, complete: missingSections.length === 0, state, diagnostics, block, missingSections };
 }
 
 export function parseLegacyState(input, options = {}) {

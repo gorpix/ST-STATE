@@ -288,7 +288,7 @@ function requireCurrentShadowBaseline(adapter, loadState, action) {
         : `Canonical ct ${baseline.canonical?.ct} does not match selected branch ct ${baseline.legacy?.ct}`;
     const message = baseline.status === 'stale'
         ? `${mismatch}. Rebaseline selected branch before ${action}.`
-        : `Import the latest chat <internal_states> baseline (complete block) before ${action}.`;
+        : `Import the latest chat <internal_states> usable baseline before ${action}.`;
     runtimeState.engine?.diagnostics?.warn(baseline.status === 'stale' ? 'BASELINE_STALE' : 'BASELINE_REQUIRED', message, baseline);
     adapter.notify?.('warning', message);
     throw new Error(message);
@@ -402,7 +402,7 @@ async function persistBranchCommit(state, ledger, report, { adapter, store, engi
     }
 }
 
-/** Restore the common pre-response checkpoint, then adopt the selected swipe if complete. */
+/** Restore the common pre-response checkpoint, then adopt the selected usable swipe state. */
 export async function handleMessageSwiped(data) {
     const adapter = runtimeState.adapter;
     const store = runtimeState.store;
@@ -431,7 +431,9 @@ export async function handleMessageSwiped(data) {
     const imported = options.pendingSwipe ? { ok: false, diagnostics: ['Pending overswipe'] } : importLegacyState(options.selectedText, {
         now: Date.now(),
         baseState: checkpointState,
-        requireComplete: true,
+        preserveMissingFromBase: true,
+        mergeSparseFromBase: true,
+        requireTurn: true,
         userName: adapter.getUserName?.(),
     });
     let canonical = checkpointState;
@@ -494,7 +496,7 @@ export async function handleMessageEdited(data) {
     const options = branchOptions(adapter, message, index);
     const invalidated = invalidateAssistantEdit(store.loadBranchLedger({ initialize: false }), options);
     if (!invalidated.ok || !invalidated.restoreState) return { status: 'missing_checkpoint' };
-    const imported = importLegacyState(messageText(message), { now: Date.now(), baseState: invalidated.restoreState, requireComplete: true, userName: adapter.getUserName?.() });
+    const imported = importLegacyState(messageText(message), { now: Date.now(), baseState: invalidated.restoreState, preserveMissingFromBase: true, mergeSparseFromBase: true, requireTurn: true, userName: adapter.getUserName?.() });
     const canonical = imported.ok && imported.state.ct === invalidated.restoreState.ct + 1
         ? preserveCanonicalBookkeeping(imported.state, invalidated.restoreState)
         : invalidated.restoreState;
@@ -628,15 +630,16 @@ export async function rebaselineSelectedBranch({ expectedChatId = undefined } = 
     const chatId = expectedChatId ?? adapter.getChatId?.();
     const chatText = (adapter.getChat?.() ?? []).map((message) => messageText(message)).join('\n');
     const previous = store.load();
-    const imported = importLegacyState(chatText, { now: Date.now(), baseState: previous, requireComplete: true, userName: adapter.getUserName?.() });
-    if (!imported.ok) throw new Error(imported.diagnostics?.join('; ') || 'No complete <internal_states> block was found on the selected branch');
+    const imported = importLegacyState(chatText, { now: Date.now(), baseState: previous, preserveMissingFromBase: true, mergeSparseFromBase: true, requireTurn: true, userName: adapter.getUserName?.() });
+    if (!imported.ok) throw new Error(imported.diagnostics?.join('; ') || 'No usable <internal_states> block was found on the selected branch');
     const canonical = preserveCanonicalBookkeeping(imported.state, previous);
     const ledger = createBranchLedger();
     const report = branchReport('manual_branch_rebaseline', canonical, { source: 'selected-branch-legacy', legacy: { status: 'baseline', ct: canonical.ct } });
     await store.saveBranchCommit(canonical, ledger, report, { expectedChatId: chatId });
     runtimeState.gfxOverlay?.clear?.();
     runtimeState.chatTopology = snapshotChatTopology(adapter);
-    return { importedDigest: imported.digest ?? canonical.head, message: `Selected branch rebaselined at ct ${canonical.ct}.` };
+    const partial = imported.complete ? '' : ` Preserved ${imported.missingSections.length} missing sections.`;
+    return { importedDigest: imported.digest ?? canonical.head, message: `Selected branch rebaselined at ct ${canonical.ct}.${partial}` };
 }
 
 export async function clearCurrentChatState({ expectedChatId = undefined } = {}) {

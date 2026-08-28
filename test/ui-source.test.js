@@ -37,6 +37,8 @@ test('settings panel exposes confirmation-gated recovery controls and callback h
     assert.match(source, /backupText/);
     assert.match(source, /globalThis\.confirm\?\./);
     assert.match(source, /aria-live/);
+    assert.match(source, /preserveMissingFromBase:\s*true/);
+    assert.match(source, /Preserved missing sections/);
 });
 
 test('settings panel exposes local GFX controls and both phone previews', async () => {

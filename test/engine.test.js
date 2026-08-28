@@ -160,11 +160,8 @@ test('complete legacy remains authoritative when the candidate is missing, malfo
     }
 });
 
-test('missing or incomplete legacy never changes canonical and all patch controls are stripped', async () => {
-    for (const legacy of [
-        '',
-        '<internal_states><details><summary>🎬 INTERNAL STATES (Turn: 1)</summary><details><summary>👥 NPC STATE</summary>- None</details></details></internal_states>',
-    ]) {
+test('missing legacy or a legacy block without a turn header never changes canonical', async () => {
+    for (const legacy of ['', '<internal_states><details><summary>🎬 INTERNAL STATES</summary><details><summary>👥 NPC STATE</summary>- None</details></details></internal_states>']) {
         const { engine, store } = setup();
         const before = store.load();
         const message = { is_user: false, mes: `prose ${legacy} <!--ST_PATCH {"version":2,"base":"GENESIS","mode":"NORMAL","tx":"reject","ops":[]} -->` };
@@ -174,6 +171,29 @@ test('missing or incomplete legacy never changes canonical and all patch control
         assert.equal(store.load().head, before.head);
         assert.doesNotMatch(message.mes, /ST_PATCH/);
     }
+});
+
+test('partial live Shadow legacy advances while omitted sections carry forward', async () => {
+    const { context, engine, store } = setup();
+    const before = store.load();
+    before.residue = [{ subject: 'Alice', event: 'Earlier event', meaning: 'Trust' }];
+    before.thoughts = [{ actor: 'Alice', thoughts: 'Earlier thought' }];
+    before.actors.BO = { id: 'BO', name: 'Bob', at: 'cold room', doing: 'sleeping' };
+    before.scene.positions = { AL: 'old doorway', BO: 'cold room' };
+    context.chatMetadata.stState = before;
+    const partial = '<internal_states><details><summary>🎬 INTERNAL STATES (Turn: 1)</summary><details><summary>👥 NPC STATE</summary>- Alice | At: room | Doing: waiting | Agenda: None | VAD: 0/0/0 | Focus: door | Aware: room | Fibs: None | Circle: None | Body: well</details><details><summary>🌍 SCENE & WORLD</summary>- Spotlight: Alice | Open Beat: door opens | Time Pressure: None<br>- Env: room | Positions: Alice: by the door</details></details></internal_states>';
+    const message = { is_user: false, mes: `prose ${partial}` };
+    const result = await engine.processAssistantMessage(message, { index: 0, messageIdentity: 'partial-live' });
+    assert.equal(result.status, 'shadow_not_comparable');
+    assert.equal(store.load().ct, 1);
+    assert.deepEqual(store.load().residue, before.residue);
+    assert.deepEqual(store.load().thoughts, before.thoughts);
+    assert.equal(store.load().actors.BO.doing, 'sleeping');
+    assert.equal(store.load().scene.positions.AL, 'by the door');
+    assert.equal(store.load().scene.positions.BO, 'cold room');
+    assert.equal(result.parity.legacy.status, 'partial_accepted');
+    assert.ok(result.parity.legacy.missingSections.includes('BONDS'));
+    assert.ok(engine.diagnostics.list().some((entry) => entry.code === 'SHADOW_LEGACY_PARTIAL'));
 });
 
 test('replayed or out-of-order legacy turn cannot regress canonical state', async () => {
