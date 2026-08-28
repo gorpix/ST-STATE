@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { HostAdapter } from '../src/adapter.js';
 import { ChatStore } from '../src/store.js';
 import { previewLocalGfx, previewLocalPhoneGfx, runtimeState, setGfxRuntimeSettings, setGlobalRuntimeMode, setRuntimeMode } from '../src/main.js';
+import { exportLegacyState, importLegacyState } from '../src/legacy.js';
+import { createEmptyState } from '../src/schema.js';
 
 function resetRuntime() {
     runtimeState.adapter = null;
@@ -110,6 +112,35 @@ test('shadow mode selection is rejected until an existing legacy chat has a base
         assert.equal(saves, 0);
         assert.equal(metadata.stStateConfig, undefined);
         assert.equal(metadata.stState, undefined);
+    } finally { resetRuntime(); }
+});
+
+test('shadow mode and default selection reject a stale selected-branch baseline', async () => {
+    const current = createEmptyState({ now: 1 }); current.ct = 7; current.meta.ct = 7;
+    const currentRaw = exportLegacyState(current);
+    const metadata = { stState: importLegacyState(currentRaw, { now: 1, requireComplete: true }).state };
+    const latest = createEmptyState({ now: 2 }); latest.ct = 9; latest.meta.ct = 9; latest.scene.openBeat = 'swiped branch';
+    const settings = {};
+    let chatSaves = 0;
+    let settingsSaves = 0;
+    const adapter = {
+        getMetadata: () => metadata,
+        getSettings: () => settings,
+        getChat: () => [{ mes: exportLegacyState(latest) }],
+        getChatId: () => 'chat',
+        saveMetadata: async () => { chatSaves += 1; },
+        saveSettingsDebounced: async () => { settingsSaves += 1; },
+        notify: () => {},
+    };
+    runtimeState.adapter = adapter;
+    runtimeState.store = new ChatStore(adapter, { now: () => 1 });
+    try {
+        await assert.rejects(setRuntimeMode('SHADOW'), /Canonical ct 7.*selected branch ct 9.*Rebaseline selected branch/);
+        await assert.rejects(setGlobalRuntimeMode('SHADOW'), /Canonical ct 7.*selected branch ct 9.*Rebaseline selected branch/);
+        assert.equal(chatSaves, 0);
+        assert.equal(settingsSaves, 0);
+        assert.equal(metadata.stStateConfig, undefined);
+        assert.equal(settings.stState, undefined);
     } finally { resetRuntime(); }
 });
 

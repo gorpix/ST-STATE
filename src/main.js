@@ -1,6 +1,6 @@
 import { HostAdapter } from './adapter.js';
 import { ChatStore } from './store.js';
-import { preserveCanonicalBookkeeping, recordControlMetadata, STStateEngine } from './engine.js';
+import { inspectShadowBaseline, preserveCanonicalBookkeeping, recordControlMetadata, STStateEngine } from './engine.js';
 import { DiagnosticLog } from './diagnostics.js';
 import { mountSettingsUI, renderDiagnosticEvents, renderReadOnlyDashboard, renderShadowParity } from './ui.js';
 import { stableMessageIdentity } from './identity.js';
@@ -278,15 +278,20 @@ function ensureSettings(adapter) {
     return ensureGlobalSettings(settings);
 }
 
-function stateHasBaseline(state) {
-    return Number(state?.ct ?? state?.meta?.ct ?? 0) > 0
-        || String(state?.head ?? state?.meta?.head ?? 'GENESIS') !== 'GENESIS'
-        || Object.keys(state?.actors ?? {}).length > 0
-        || Boolean(state?.opaque?.legacy?.internalStatesRaw || Object.keys(state?.opaque?.legacy?.sections ?? {}).length);
-}
-
-function chatHasLegacyState(adapter) {
-    return (adapter?.getChat?.() ?? []).some((message) => /<internal_states\b/i.test(messageText(message)));
+function requireCurrentShadowBaseline(adapter, loadState, action) {
+    let baseline = inspectShadowBaseline(adapter, undefined);
+    if (baseline.ready) return baseline;
+    baseline = inspectShadowBaseline(adapter, loadState());
+    if (baseline.ready) return baseline;
+    const mismatch = baseline.status === 'stale' && baseline.canonical.ct === baseline.legacy.ct
+        ? `Canonical state differs from the selected branch at ct ${baseline.canonical.ct}`
+        : `Canonical ct ${baseline.canonical?.ct} does not match selected branch ct ${baseline.legacy?.ct}`;
+    const message = baseline.status === 'stale'
+        ? `${mismatch}. Rebaseline selected branch before ${action}.`
+        : `Import the latest chat <internal_states> baseline (complete block) before ${action}.`;
+    runtimeState.engine?.diagnostics?.warn(baseline.status === 'stale' ? 'BASELINE_STALE' : 'BASELINE_REQUIRED', message, baseline);
+    adapter.notify?.('warning', message);
+    throw new Error(message);
 }
 
 function refreshUI() {
@@ -706,9 +711,7 @@ export async function setRuntimeMode(mode) {
     const metadata = adapter.getMetadata?.();
     const normalized = normalizeEngineMode(mode);
     const store = runtimeState.store ?? new ChatStore(adapter);
-    if (normalized === 'SHADOW' && chatHasLegacyState(adapter) && !stateHasBaseline(store.load({ initialize: false }))) {
-        throw new Error('Import the latest chat <internal_states> baseline before enabling Shadow mode.');
-    }
+    if (normalized === 'SHADOW') requireCurrentShadowBaseline(adapter, () => store.load({ initialize: false }), 'enabling Shadow mode');
     const hadPrevious = Object.prototype.hasOwnProperty.call(metadata ?? {}, CHAT_CONFIG_KEY);
     const previous = hadPrevious ? deepClone(metadata[CHAT_CONFIG_KEY]) : undefined;
     const selected = setChatMode(metadata, mode, { now: Date.now() });
@@ -731,9 +734,7 @@ export async function setGlobalRuntimeMode(mode) {
     const settings = adapter.getSettings?.();
     const normalized = normalizeEngineMode(mode);
     const store = runtimeState.store ?? new ChatStore(adapter);
-    if (normalized === 'SHADOW' && chatHasLegacyState(adapter) && !stateHasBaseline(store.load({ initialize: false }))) {
-        throw new Error('Import the latest chat <internal_states> baseline before making Shadow the default.');
-    }
+    if (normalized === 'SHADOW') requireCurrentShadowBaseline(adapter, () => store.load({ initialize: false }), 'making Shadow the default');
     const hadPrevious = Object.prototype.hasOwnProperty.call(settings ?? {}, SETTINGS_KEY);
     const previous = hadPrevious ? deepClone(settings[SETTINGS_KEY]) : undefined;
     const selected = setGlobalDefaultMode(settings, normalized);

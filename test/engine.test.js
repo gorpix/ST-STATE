@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { HostAdapter } from '../src/adapter.js';
 import { ChatStore } from '../src/store.js';
 import { STStateEngine } from '../src/engine.js';
-import { exportLegacyState } from '../src/legacy.js';
+import { exportLegacyState, importLegacyState } from '../src/legacy.js';
 import { applyTransaction } from '../src/reducer.js';
 import { setChatMode } from '../src/modes.js';
 import { createEmptyState } from '../src/schema.js';
@@ -67,6 +67,46 @@ test('shadow prompt injection waits for baseline when an existing chat has legac
     assert.equal(result.injected, false);
     assert.equal(result.reason, 'baseline_required');
     assert.equal(context.injection[1], '');
+});
+
+test('shadow prompt injection blocks a stale selected-branch baseline', async () => {
+    const { context, engine } = setup();
+    const current = createEmptyState({ now: 1 }); current.ct = 4; current.meta.ct = 4;
+    const currentRaw = exportLegacyState(current);
+    context.chatMetadata.stState = importLegacyState(currentRaw, { now: 1, requireComplete: true }).state;
+    const latest = createEmptyState({ now: 2 }); latest.ct = 5; latest.meta.ct = 5; latest.scene.openBeat = 'new branch';
+    context.chat = [{ is_user: false, mes: exportLegacyState(latest) }];
+    const result = await engine.injectPrompt('normal');
+    assert.equal(result.injected, false);
+    assert.equal(result.reason, 'baseline_stale');
+    assert.equal(result.baseline.canonical.ct, 4);
+    assert.equal(result.baseline.legacy.ct, 5);
+    assert.equal(context.injection[1], '');
+    assert.ok(engine.diagnostics.list().some((event) => event.code === 'BASELINE_STALE'));
+});
+
+test('shadow prompt injection accepts the exact latest selected-branch baseline', async () => {
+    const { context, engine } = setup();
+    const latest = createEmptyState({ now: 1 }); latest.ct = 4; latest.meta.ct = 4; latest.scene.openBeat = 'same branch';
+    const raw = exportLegacyState(latest);
+    context.chatMetadata.stState = importLegacyState(raw, { now: 1, requireComplete: true }).state;
+    context.chat = [{ is_user: false, mes: raw }];
+    const result = await engine.injectPrompt('normal');
+    assert.equal(result.injected, true);
+});
+
+test('shadow prompt injection detects different branch content at the same ct', async () => {
+    const { context, engine } = setup();
+    const current = createEmptyState({ now: 1 }); current.ct = 4; current.meta.ct = 4; current.scene.openBeat = 'left branch';
+    const currentRaw = exportLegacyState(current);
+    context.chatMetadata.stState = importLegacyState(currentRaw, { now: 1, requireComplete: true }).state;
+    const selected = createEmptyState({ now: 2 }); selected.ct = 4; selected.meta.ct = 4; selected.scene.openBeat = 'right branch';
+    context.chat = [{ is_user: false, mes: exportLegacyState(selected) }];
+    const result = await engine.injectPrompt('normal');
+    assert.equal(result.reason, 'baseline_stale');
+    assert.equal(result.baseline.canonical.ct, result.baseline.legacy.ct);
+    assert.notEqual(result.baseline.canonical.head, result.baseline.legacy.head);
+    assert.ok(engine.diagnostics.list().some((event) => /differs from the selected branch at ct 4/.test(event.message)));
 });
 
 test('OOC and FLASH remain frozen in shadow mode', async () => {

@@ -61,6 +61,35 @@ function chatContainsLegacy(adapter) {
     return (adapter?.getChat?.() ?? []).some((message) => /<internal_states\b/i.test(messageText(message)));
 }
 
+function chatLegacyText(adapter) {
+    return (adapter?.getChat?.() ?? []).map((message) => messageText(message)).join('\n');
+}
+
+export function inspectShadowBaseline(adapter, state, { now = Date.now() } = {}) {
+    if (!chatContainsLegacy(adapter)) return { status: 'no_legacy', ready: true };
+    if (!hasCanonicalBaseline(state)) return { status: 'missing', ready: false };
+    const imported = importLegacyState(chatLegacyText(adapter), {
+        now,
+        baseState: state,
+        requireComplete: true,
+        userName: adapter?.getUserName?.(),
+    });
+    if (!imported.ok) {
+        return {
+            status: 'incomplete',
+            ready: false,
+            diagnostics: deepClone(imported.diagnostics ?? []),
+        };
+    }
+    const canonical = {
+        ct: Number(state?.ct ?? state?.meta?.ct ?? 0),
+        head: String(state?.head ?? state?.meta?.head ?? 'GENESIS'),
+    };
+    const legacy = { ct: imported.state.ct, head: imported.state.head };
+    const ready = canonical.ct === legacy.ct && canonical.head === legacy.head;
+    return { status: ready ? 'current' : 'stale', ready, canonical, legacy };
+}
+
 export class STStateEngine {
     constructor({ adapter, store, diagnostics = new DiagnosticLog(), now = () => Date.now(), modeResolver = null } = {}) {
         this.adapter = adapter;
@@ -115,10 +144,21 @@ export class STStateEngine {
             return { injected: false, skipped: true, type: generationType, mode, reason };
         }
         const state = this.loadState({ initialize: false });
-        if (chatContainsLegacy(this.adapter) && !hasCanonicalBaseline(state)) {
+        const baseline = inspectShadowBaseline(this.adapter, state, { now: this.now() });
+        if (baseline.status === 'missing' || baseline.status === 'incomplete') {
             this.adapter.clearPrompt();
             this.diagnostics.warn('BASELINE_REQUIRED', 'Import the latest complete legacy state before Shadow prompt injection.');
-            return { injected: false, skipped: true, type: generationType, mode, reason: 'baseline_required' };
+            return { injected: false, skipped: true, type: generationType, mode, reason: 'baseline_required', baseline };
+        }
+        if (baseline.status === 'stale') {
+            this.adapter.clearPrompt();
+            const mismatch = baseline.canonical.ct === baseline.legacy.ct
+                ? `Canonical state differs from the selected branch at ct ${baseline.canonical.ct}`
+                : `Canonical ct ${baseline.canonical.ct} does not match selected branch ct ${baseline.legacy.ct}`;
+            const message = `${mismatch}. Rebaseline selected branch before generating.`;
+            this.diagnostics.warn('BASELINE_STALE', message, baseline);
+            this.adapter.notify?.('warning', `ST-STATE blocked generation: ${message}`);
+            return { injected: false, skipped: true, type: generationType, mode, reason: 'baseline_stale', baseline };
         }
         try {
             const prompt = this.buildPrompt({ ...options, mode });
