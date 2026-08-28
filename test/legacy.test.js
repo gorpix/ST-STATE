@@ -102,3 +102,15 @@ test('legacy scene positions accept known actor prefixes without colon delimiter
     assert.deepEqual(Object.keys(imported.state.actors).sort(), ['AL', 'BO']);
 });
 
+test('legacy scene positions resolve unique short names and comma-separated actors', () => {
+    const state = createEmptyState({ now: 1 });
+    state.actors = { US: { id: 'US', name: 'Janko Makar (wolf)' }, NS: { id: 'NS', name: 'Nick Snickerson' } };
+    const source = exportLegacyState(state).replace('Positions: None', "Positions: Nick on back on Janko's bed, Janko over Nick, nose at waistband; desk item nearby");
+    const imported = importLegacyState(source, { requireComplete: true, userName: 'Janko Makar' });
+    assert.equal(imported.ok, true);
+    assert.deepEqual(imported.state.scene.positions, {
+        NS: "on back on Janko's bed",
+        US: 'over Nick, nose at waistband',
+    });
+});
+

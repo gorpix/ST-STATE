@@ -1,6 +1,7 @@
 import { createEmptyState, migrateState, relationKey } from './schema.js';
 import { makeStableActorId, isUserLabel, isValidActorId, normalizeActorId } from './identity.js';
 import { deepClone, escapeHtmlText, hasOwn, isPlainObject, plainTextFromHtml, sanitizePlainText, splitPipeFields, stableHash } from './util.js';
+import { normalizeLegacyPositionString } from './validation.js';
 
 const SECTION_NAMES = Object.freeze({
     npc: '👥 NPC STATE',
@@ -354,23 +355,14 @@ function parseSceneSection(state, section, diagnostics, userName = '') {
             if (match) {
                 const id = actorIdForName(state, match[1], userName);
                 state.scene.positions[id] = parseValueOrNone(match[2]);
-                continue;
             }
-            // Older presets often wrote "Dex center floor" instead of
-            // "Dex: center floor". Resolve only an already-known actor label;
-            // never manufacture an actor from arbitrary position prose.
-            const source = sanitizePlainText(pair, { maxLength: 2000, preserveNewlines: false }).trim();
-            const labels = Object.entries(state.actors).flatMap(([id, actor]) => [
-                { id, label: id },
-                { id, label: actor?.name },
-                { id, label: actor?.displayName },
-                ...(id === 'US' ? [{ id, label: userName }, { id, label: '{{user}}' }, { id, label: 'User' }] : []),
-            ]).filter((entry) => entry.label).sort((left, right) => String(right.label).length - String(left.label).length);
-            const known = labels.find(({ label }) => source.toLowerCase().startsWith(`${String(label).trim().toLowerCase()} `));
-            if (!known) continue;
-            const position = source.slice(String(known.label).trim().length).trim().replace(/^[-–—:=>]+\s*/, '');
-            if (position) state.scene.positions[known.id] = parseValueOrNone(position);
         }
+        // Also accept old prose such as "Nick on the bed, Janko beside him".
+        // The shared validator helper resolves only known, unambiguous labels.
+        const compatibleState = userName && state.actors.US && !String(state.actors.US.name ?? '').toLowerCase().includes(userName.toLowerCase())
+            ? { ...state, actors: { ...state.actors, US: { ...state.actors.US, displayName: userName } } }
+            : state;
+        Object.assign(state.scene.positions, normalizeLegacyPositionString(state.scene.positionsRaw, compatibleState));
         delete state.scene.positionsRaw;
     }
     if (lines.length && !lines.some((line) => /Spotlight:|Open Beat:|Env:|Positions:/i.test(line))) diagnostics.unparsed.push(...lines);

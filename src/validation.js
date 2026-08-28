@@ -150,7 +150,7 @@ function normalizeActorField(field, value, path, errors) {
     return validateText(value, path, errors, { maxLength: field === 'name' || field === 'displayName' ? 200 : 2000 });
 }
 
-function normalizeLegacyPositionString(value, state, path, errors) {
+export function normalizeLegacyPositionString(value, state, path = 'positions', errors = []) {
     const actors = Object.entries(state?.actors ?? {});
     const labels = actors.flatMap(([id, actor]) => [id, actor?.name, actor?.displayName]
         .filter(Boolean).map((label) => ({ id, label: String(label).trim() })))
