@@ -17,12 +17,13 @@ This release is an evaluative Shadow build with presentation-only local GFX. `LE
 - Versioned per-chat schema, migration, backup/restore preview, and tolerant importer/exporter for the current `<internal_states>` legacy format.
 - Explicit `LEGACY`, `SHADOW`, `NATIVE`, and `RECOVERY` modes with global default and per-chat override.
 - Shadow handshake, compact hot-state pack, strict dry-run patch validation, actor/scene/ct parity diagnostics, and an isolated `stStateShadow` sidecar.
+- Dormant Unified Local Frame projection for the future Native prompt. It folds each selected actor's placement, activity, thoughts, and emotional residue into one deterministic record while keeping canonical storage normalized; unmatched material is retained explicitly. It is not yet wired into Shadow injection.
 - Per-assistant-slot checkpoints with released SillyTavern swipe/edit/delete event handling. Selecting or generating another swipe restores the common pre-response state before that branch becomes canonical.
 - Backup-gated **Rebaseline selected branch**, **Clear current chat state**, and **Restore previous state** controls. Candidate patches never enter canonical history.
 - Strict `ST_GFX V1` line parser and local text-only artifact renderer for phone, terminal, paper, map, notice, credential, transaction, web, broadcast, data, image, monitor, and media pop-ins. Phone artifacts include distinct iPhone-like and Android-like chat, notification, call, and email layouts.
 - Branch-bound GFX replay cache stored with the selected message swipe; swiping, editing, deleting, clearing, or changing chat replaces or clears abandoned overlays.
 
-Later mechanics (Bonds reducers, agendas, Chekhov, DND, clocks, knowledge, commitments, persistent artifact state, phone contact threads, and flash orchestration) are intentionally not implemented.
+Later mechanics (agenda, Chekhov, DND, clocks, knowledge, commitments, persistent artifact state, phone contact threads, and flash orchestration) are intentionally not implemented. Numeric Bonds/Sparks/Grudge reducers are already covered by Shadow parity.
 
 ## Install
 
