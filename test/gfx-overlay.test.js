@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { GfxOverlay, createGfxOverlay } from '../src/gfx-overlay.js';
+import { GfxOverlay, calculateGfxDuration, createGfxOverlay } from '../src/gfx-overlay.js';
 
 class FakeClassList {
     constructor() { this.values = new Set(); }
@@ -75,19 +75,18 @@ test('phone bubbles follow explicit row roles and retain timestamps as text', ()
     assert.match(rows[0].textContent, /09:41/);
 });
 
-test('phone status metadata is rendered once in the status bar', () => {
+test('status-only phone metadata is rendered once and never restored below the contact', () => {
     const documentRef = documentFixture();
     const overlay = new GfxOverlay({ document: documentRef, duration: 0 });
     const card = overlay.show({
         id: 'android-status', kind: 'phone', platform: 'android', title: 'Chat', source: 'Niko',
-        meta: { time: '09:41', battery: 'LTE 82%', subtitle: 'Encrypted' }, rows: ['Hello'],
+        meta: { time: '09:41', battery: 'LTE 82%' }, rows: ['Hello'],
     });
     const frame = card.children[0];
     const status = frame.children.find((node) => node.className.includes('st-gfx-phone-status'));
     const meta = frame.children.find((node) => node.className === 'st-gfx-meta');
     assert.equal(status.textContent, '09:41LTE 82%');
-    assert.equal(meta.textContent, 'Encrypted');
-    assert.doesNotMatch(meta.textContent, /09:41|82%/);
+    assert.equal(meta, undefined);
 });
 
 test('iOS status bar owns cellular, wifi, and battery geometry', () => {
@@ -100,6 +99,16 @@ test('iOS status bar owns cellular, wifi, and battery geometry', () => {
     assert.equal(indicators.children.some((node) => node.className === 'st-gfx-ios-wifi'), true);
     assert.equal(indicators.children.some((node) => node.className === 'st-gfx-ios-battery'), true);
     assert.match(status.textContent, /09:41.*87/);
+});
+
+test('duration uses the setting as a floor and extends with visible message words', () => {
+    const short = { rows: [{ role: 'received', text: 'Keep moving.' }] };
+    const long = { rows: [{ role: 'received', text: Array.from({ length: 40 }, (_, index) => `word${index}`).join(' ') }] };
+    assert.equal(calculateGfxDuration(short, 7000), 7000);
+    assert.equal(calculateGfxDuration(long, 7000), 12_500);
+    assert.equal(calculateGfxDuration(long, 15_000), 15_000);
+    assert.equal(calculateGfxDuration(long, 0), 0);
+    assert.equal(calculateGfxDuration({ rows: [{ text: 'word '.repeat(400) }] }, 7000), 45_000);
 });
 
 test('deduplicates IDs, bounds visible cards, and replaces branches', () => {

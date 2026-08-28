@@ -111,6 +111,25 @@ function rowEntries(event) {
     return [];
 }
 
+function rowReadingText(row) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) return text(row);
+    return text(row.value ?? row.text ?? row.content ?? row.body ?? '');
+}
+
+function wordCount(value) {
+    return text(value).match(/[\p{L}\p{N}]+(?:['’.-][\p{L}\p{N}]+)*/gu)?.length ?? 0;
+}
+
+/** Use the configured duration as a floor, extending dense artifacts for reading time. */
+export function calculateGfxDuration(event, configuredDuration = DEFAULT_GFX_OVERLAY_OPTIONS.duration) {
+    const floor = durationValue(configuredDuration, DEFAULT_GFX_OVERLAY_OPTIONS.duration);
+    if (floor === 0) return 0;
+    const words = rowEntries(event).reduce((total, row) => total + wordCount(rowReadingText(row)), 0);
+    if (!words) return floor;
+    const readingTime = 2500 + (words * 250);
+    return Math.min(45_000, Math.max(floor, readingTime));
+}
+
 function appendRow(documentRef, list, row, index) {
     const role = row && typeof row === 'object' && !Array.isArray(row) ? row.role : undefined;
     const item = appendText(documentRef, list, 'div', `st-gfx-row st-gfx-row-role-${classToken(role, 'neutral')}`);
@@ -132,11 +151,11 @@ const PHONE_STATUS_META_KEYS = new Set(['time', 'battery', 'indicators', 'signal
 function appendMeta(documentRef, card, event, { phone = false } = {}) {
     const source = event?.source ?? event?.origin ?? event?.from;
     if (source !== undefined && text(source) !== '') appendText(documentRef, card, 'div', 'st-gfx-source', source);
-    const metadataInput = event?.meta && typeof event.meta === 'object' && !Array.isArray(event.meta) ? event.meta : {};
-    const metadataValues = { ...metadataInput };
+    const metadataObject = event?.meta && typeof event.meta === 'object' && !Array.isArray(event.meta) ? event.meta : null;
+    const metadataValues = { ...(metadataObject ?? {}) };
     if (phone) for (const key of PHONE_STATUS_META_KEYS) delete metadataValues[key];
     for (const key of ['actor', 'position', 'subtitle']) if (event?.[key] !== undefined && metadataValues[key] === undefined) metadataValues[key] = event[key];
-    const meta = Object.keys(metadataValues).length ? metadataValues : event?.meta;
+    const meta = Object.keys(metadataValues).length ? metadataValues : (metadataObject ? null : event?.meta);
     if (meta === undefined || meta === null || meta === '') return;
     const metadata = appendText(documentRef, card, 'div', 'st-gfx-meta');
     if (meta && typeof meta === 'object' && !Array.isArray(meta)) {
@@ -237,7 +256,7 @@ export class GfxOverlay {
         this.cards.set(id, card);
         this.root.append(card);
         this.#trim();
-        const ttl = durationValue(event.duration ?? event.durationMs ?? event.ttlMs, this.options.duration);
+        const ttl = calculateGfxDuration(event, this.options.duration);
         if (ttl > 0) {
             const timer = setTimeout(() => this.dismiss(id), ttl);
             // Node-based host tests should not be held open by a cosmetic TTL;

@@ -1,4 +1,4 @@
-# ST-STATE v0.4.0-eval.2
+# ST-STATE v0.4.0-eval.3
 
 Browser-only, third-party [SillyTavern](https://docs.sillytavern.app/for-contributors/writing-extensions/) UI extension for ST-ENDGAME's durable state ledger and local in-world artifact renderer. It keeps canonical per-chat JSON in `chatMetadata.stState`, per-chat mode configuration in `chatMetadata.stStateConfig`, shadow parity in `chatMetadata.stStateShadow`, branch checkpoints in `chatMetadata.stStateBranches`, global preferences in `extensionSettings.stState`, and accepts the evaluative `ST_PATCH` and `ST_GFX` hidden line controls.
 
@@ -54,7 +54,7 @@ Each assistant message slot retains the complete state from immediately before i
 
 On a NORMAL turn that visibly presents an in-world visual medium, ST-ENDGAME emits at most one hidden `ST_GFX V1` line block after state controls. ST-STATE accepts only allowlisted media, public/visible content, bounded plain-text fields, and at most 16 rows. It strips complete, malformed, or dangling controls from the selected swipe and renders accepted artifacts with DOM element creation and `textContent`; model HTML, CSS, scripts, JSON, and external assets are never interpreted.
 
-The settings drawer can enable/disable Shadow pop-ins, choose their duration, and preview the iPhone-like and Android-like phone skins in any mode. Parsed artifacts are presentation-only and never enter canonical state or Shadow parity.
+The settings drawer can enable/disable Shadow pop-ins, choose a minimum duration, and preview the iPhone-like and Android-like phone skins in any mode. The renderer extends that minimum using a bounded visible-message reading-time estimate and caps automatic duration at 45 seconds. Parsed artifacts are presentation-only and never enter canonical state or Shadow parity.
 
 The iPhone skin will use local SF Pro Display Regular, Medium, and Bold files from `assets/fonts/` when supplied by the user; those proprietary binaries are intentionally not redistributed. Without them it uses the closest system font stack. All status icons are drawn locally by ST-STATE and require no icon font or network request.
 

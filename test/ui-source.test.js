@@ -25,7 +25,7 @@ test('settings panel exposes confirmation-gated recovery controls and callback h
 
 test('settings panel exposes local GFX controls and both phone previews', async () => {
     const source = await readFile(new URL('../src/ui.js', import.meta.url), 'utf8');
-    for (const label of ['Local pop-in GFX', 'Preview iPhone-like', 'Preview Android-like']) assert.match(source, new RegExp(label));
+    for (const label of ['Local pop-in GFX', 'Minimum duration', 'Preview iPhone-like', 'Preview Android-like']) assert.match(source, new RegExp(label));
     for (const callback of ['getGfxSettings', 'setGfxSettings', 'onPreviewGfx']) assert.match(source, new RegExp(callback));
     assert.match(source, /durationMs/);
 });

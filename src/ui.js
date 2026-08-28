@@ -301,8 +301,8 @@ export function mountSettingsUI({ host, store, getMode = () => 'LEGACY', setMode
     const gfxEnabled = element('input'); gfxEnabled.type = 'checkbox'; gfxEnabled.setAttribute('aria-label', 'Enable local pop-in graphics');
     gfxEnabled.checked = getGfxSettings().enabled !== false;
     gfxEnabledLabel.append(gfxEnabled);
-    const gfxDurationLabel = element('label', 'st-mode-label', 'Duration');
-    const gfxDuration = element('select'); gfxDuration.setAttribute('aria-label', 'Local pop-in duration');
+    const gfxDurationLabel = element('label', 'st-mode-label', 'Minimum duration');
+    const gfxDuration = element('select'); gfxDuration.setAttribute('aria-label', 'Minimum local pop-in duration');
     for (const [label, value] of [['5 sec', 5000], ['7 sec', 7000], ['10 sec', 10000], ['15 sec', 15000]]) {
         const option = element('option', '', label); option.value = String(value); gfxDuration.append(option);
     }
