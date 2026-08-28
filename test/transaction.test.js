@@ -154,6 +154,17 @@ test('legacy prose scene positions resolve known names and ignore object clauses
         US: "pressed to Nick's side by the monitor box, paw on his ass",
         NI: "shirtless, arm around Janko's neck",
     });
+
+    before.actors.US.name = 'Janko Makar (wolf)';
+    before.actors.NI.name = 'Nick Snickerson';
+    const shortNames = validatePatchEnvelope({ version: 2, base: before.head, mode: 'NORMAL', ops: [
+        { op: 'scene.set', set: { positions: "Nick on back on Janko's bed (gear on floor), Janko over him, nose at waistband; desk item nearby" } },
+    ] }, { state: before });
+    assert.equal(shortNames.ok, true);
+    assert.deepEqual(shortNames.value.ops[0].set.positions, {
+        NI: "on back on Janko's bed (gear on floor)",
+        US: 'over him, nose at waistband',
+    });
 });
 
 test('stale base and duplicate transaction do not mutate state', () => {

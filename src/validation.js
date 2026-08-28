@@ -154,18 +154,32 @@ function normalizeLegacyPositionString(value, state, path, errors) {
     const actors = Object.entries(state?.actors ?? {});
     const labels = actors.flatMap(([id, actor]) => [id, actor?.name, actor?.displayName]
         .filter(Boolean).map((label) => ({ id, label: String(label).trim() })))
-        .sort((left, right) => right.label.length - left.label.length);
+        .filter((entry, index, entries) => entries.findIndex((candidate) => candidate.id === entry.id && candidate.label.toLowerCase() === entry.label.toLowerCase()) === index);
+    const shortCounts = new Map();
+    for (const { label } of labels) {
+        const short = label.match(/^([\p{L}\p{N}_'-]+)/u)?.[1] ?? '';
+        if (short.length > 1) shortCounts.set(short.toLowerCase(), (shortCounts.get(short.toLowerCase()) ?? 0) + 1);
+    }
+    for (const { id, label } of [...labels]) {
+        const short = label.match(/^([\p{L}\p{N}_'-]+)/u)?.[1] ?? '';
+        if (short.length > 1 && shortCounts.get(short.toLowerCase()) === 1 && short.toLowerCase() !== label.toLowerCase()) labels.push({ id, label: short });
+    }
+    labels.sort((left, right) => right.label.length - left.label.length);
+    const escapedLabels = labels.map(({ label }) => label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    const actorClause = escapedLabels.length ? new RegExp(`,\\s*(?=(?:${escapedLabels.join('|')})\\s)`, 'iu') : null;
     const result = {};
     for (const rawPart of String(value).split(/[;\n]+/)) {
-        const part = sanitizePlainText(rawPart, { maxLength: 1000, preserveNewlines: false }).trim();
-        if (!part) continue;
-        const explicit = part.match(/^(.+?)\s*[:=]\s*(.+)$/);
-        const known = explicit
-            ? labels.find(({ label }) => label.toLowerCase() === explicit[1].trim().toLowerCase())
-            : labels.find(({ label }) => part.toLowerCase().startsWith(`${label.toLowerCase()} `));
-        if (!known) continue;
-        const position = explicit ? explicit[2].trim() : part.slice(known.label.length).trim().replace(/^[-–—:=>]+\s*/, '');
-        if (position) result[known.id] = validateText(position, `${path}.${known.id}`, errors, { maxLength: 500 });
+        const source = sanitizePlainText(rawPart, { maxLength: 2000, preserveNewlines: false }).trim();
+        for (const part of actorClause ? source.split(actorClause) : [source]) {
+            if (!part) continue;
+            const explicit = part.match(/^(.+?)\s*[:=]\s*(.+)$/);
+            const known = explicit
+                ? labels.find(({ label }) => label.toLowerCase() === explicit[1].trim().toLowerCase())
+                : labels.find(({ label }) => part.toLowerCase().startsWith(`${label.toLowerCase()} `));
+            if (!known) continue;
+            const position = explicit ? explicit[2].trim() : part.slice(known.label.length).trim().replace(/^[-–—:=>]+\s*/, '');
+            if (position) result[known.id] = validateText(position, `${path}.${known.id}`, errors, { maxLength: 500 });
+        }
     }
     if (!Object.keys(result).length) fail(errors, path, 'legacy position text must begin with at least one known actor name or ID');
     return result;
