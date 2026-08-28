@@ -3,4 +3,6 @@ node_modules/
 coverage/
 dist/
 *.log
+assets/fonts/*.OTF
+assets/fonts/*.otf
 

@@ -757,7 +757,7 @@ export function previewLocalPhoneGfx(platform = 'ios') {
         visibility: 'public',
         title: selected === 'ios' ? 'Messages' : 'Chat',
         source: selected === 'ios' ? 'Mara' : 'Niko',
-        meta: { time: '09:41', battery: selected === 'ios' ? '5G  87%' : 'LTE  82%' },
+        meta: { time: '09:41', battery: selected === 'ios' ? 'Wi-Fi 87%' : 'LTE 82%' },
         rows: [
             { role: 'received', label: selected === 'ios' ? 'Mara' : 'Niko', time: '09:40', text: 'You seeing this?' },
             { role: 'sent', label: '{{user}}', time: '09:41', text: 'Yeah. Keep the line open.' },

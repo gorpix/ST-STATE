@@ -47,6 +47,11 @@
 #st-state-settings .st-mode-label { display: inline-flex; align-items: center; gap: .35rem; }
 #st-state-settings .st-shadow-parity { border: 1px solid var(--st-border); border-radius: .4rem; padding: .5rem; }
 
+/* Optional user-supplied local iPhone font; absent files fall back without networking. */
+@font-face { font-family: "ST SF Pro Display"; src: url("./assets/fonts/SFPRODISPLAYREGULAR.OTF") format("opentype"); font-style: normal; font-weight: 400; font-display: swap; }
+@font-face { font-family: "ST SF Pro Display"; src: url("./assets/fonts/SFPRODISPLAYMEDIUM.OTF") format("opentype"); font-style: normal; font-weight: 500 600; font-display: swap; }
+@font-face { font-family: "ST SF Pro Display"; src: url("./assets/fonts/SFPRODISPLAYBOLD.OTF") format("opentype"); font-style: normal; font-weight: 700 900; font-display: swap; }
+
 /* Local in-world graphics. Model values are inserted as text by gfx-overlay.js. */
 .st-gfx-overlay {
   position: fixed;
@@ -93,46 +98,76 @@
 .st-gfx-card.st-gfx-kind-phone { overflow: visible; border: 0; background: transparent; box-shadow: none; }
 .st-gfx-phone-shell {
   box-sizing: border-box;
+  position: relative;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
-  width: min(22.5rem, calc(100vw - 1.25rem));
+  width: min(18rem, 100%);
+  width: min(18rem, 100%, calc(46.1538vh - 2.54rem));
+  width: min(18rem, 100%, calc(46.1538dvh - 2.54rem));
+  aspect-ratio: 9 / 19.5;
   margin-left: auto;
   box-shadow: 0 1.1rem 3rem rgba(0, 0, 0, .48), 0 .2rem .7rem rgba(0, 0, 0, .3);
 }
-.st-gfx-phone-ios { border: 6px solid #09090b; border-radius: 2rem; background: linear-gradient(180deg, #fbfbfd, #f2f2f7); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-.st-gfx-phone-android { border: 3px solid #263238; border-radius: 1.25rem; background: linear-gradient(180deg, #f7f7ff, #f0f4f9); font-family: Roboto, "Segoe UI", system-ui, sans-serif; }
-.st-gfx-phone-notch { margin-right: auto; margin-left: auto; background: #050505; }
-.st-gfx-phone-notch-ios { width: 6.3rem; height: 1.18rem; margin-top: .32rem; border-radius: 999px; box-shadow: inset 0 0 0 1px #202024; }
-.st-gfx-phone-notch-android { width: .68rem; height: .68rem; margin-top: .32rem; border-radius: 999px; box-shadow: 0 0 0 2px #cbd5e1; }
-.st-gfx-phone-status { display: flex; justify-content: space-between; padding: .25rem .9rem .35rem; font-size: .68rem; font-weight: 650; letter-spacing: .01em; }
+.st-gfx-phone-ios { border: 6px solid #09090b; border-radius: 2rem; background: #f2f2f7; color: #1c1c1e; font-family: "ST SF Pro Display", "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.st-gfx-phone-android { border: 4px solid #202124; border-radius: 1.6rem; background: #f7f9fc; color: #202124; font-family: Roboto, "Segoe UI", system-ui, sans-serif; }
+.st-gfx-phone-notch { position: absolute; z-index: 2; top: .38rem; left: 50%; transform: translateX(-50%); background: #050505; pointer-events: none; }
+.st-gfx-phone-notch-ios { width: 6.3rem; height: 1.18rem; border-radius: 999px; box-shadow: inset 0 0 0 1px #202024; }
+.st-gfx-phone-notch-android { top: .52rem; width: .66rem; height: .66rem; border-radius: 999px; box-shadow: 0 0 0 2px rgba(255, 255, 255, .72); }
+.st-gfx-phone-status { box-sizing: border-box; display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; min-height: 2rem; padding: .48rem .9rem .34rem; color: #1c1c1e; font-size: .68rem; font-weight: 700; letter-spacing: .01em; }
 .st-gfx-phone-status-ios { background: #f9f9fb; }
-.st-gfx-phone-status-android { background: #e7e8f3; }
-.st-gfx-phone-ios .st-gfx-header { justify-content: center; padding: .5rem .85rem .62rem; background: rgba(249, 249, 251, .92); }
+.st-gfx-phone-status-android { min-height: 2.15rem; padding-top: .58rem; background: #eef2f6; color: #202124; }
+.st-gfx-phone-status-ios { font-family: "ST SF Pro Display", "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: .69rem; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.012em; }
+.st-gfx-phone-indicators { display: inline-flex; align-items: center; justify-content: flex-end; gap: .28rem; min-height: .75rem; }
+.st-gfx-ios-cellular { display: inline-flex; align-items: flex-end; gap: 1px; width: .85rem; height: .7rem; }
+.st-gfx-ios-cellular-bar { display: block; width: 2px; border-radius: 1px; background: currentColor; }
+.st-gfx-ios-cellular-bar-1 { height: 28%; }
+.st-gfx-ios-cellular-bar-2 { height: 48%; }
+.st-gfx-ios-cellular-bar-3 { height: 70%; }
+.st-gfx-ios-cellular-bar-4 { height: 94%; }
+.st-gfx-ios-network { margin-left: -.08rem; font-size: .61rem; font-weight: 700; letter-spacing: -.025em; }
+.st-gfx-ios-wifi { position: relative; display: block; width: .85rem; height: .68rem; background: radial-gradient(circle at 50% 100%, currentColor 0 1.2px, transparent 1.35px), radial-gradient(ellipse at 50% 108%, transparent 0 3px, currentColor 3.1px 4px, transparent 4.15px), radial-gradient(ellipse at 50% 112%, transparent 0 5.4px, currentColor 5.5px 6.4px, transparent 6.55px); }
+.st-gfx-ios-battery { position: relative; box-sizing: border-box; display: inline-grid; place-items: center; width: 1.45rem; height: .69rem; margin-left: .02rem; border: 1px solid currentColor; border-radius: .2rem; font-size: .48rem; font-weight: 750; line-height: 1; }
+.st-gfx-ios-battery::after { content: ''; position: absolute; top: 50%; right: -.17rem; width: .11rem; height: .32rem; border-radius: 0 .08rem .08rem 0; background: currentColor; transform: translateY(-50%); opacity: .55; }
+.st-gfx-ios-battery-level { position: absolute; z-index: 0; inset: 1px; border-radius: .1rem; background: currentColor; opacity: .16; }
+.st-gfx-ios-battery-text { position: relative; z-index: 1; }
+.st-gfx-phone-ios .st-gfx-header { justify-content: center; padding: .5rem .85rem .62rem; background: rgba(249, 249, 251, .96); color: #1c1c1e; }
 .st-gfx-phone-ios .st-gfx-kind { display: none; }
-.st-gfx-phone-android .st-gfx-header { padding: .6rem .85rem; background: #e7e8f3; border-bottom: 1px solid #d7d9e6; }
-.st-gfx-phone-android .st-gfx-kind { color: #64748b; }
+.st-gfx-phone-android .st-gfx-header { box-sizing: border-box; flex: 0 0 auto; align-items: center; min-height: 3rem; padding: .62rem .85rem; background: #e8eef5; color: #202124; border-bottom: 1px solid #d4dce6; }
+.st-gfx-phone-android .st-gfx-kind { display: none; }
+.st-gfx-phone-ios .st-gfx-title, .st-gfx-phone-android .st-gfx-title { color: inherit; line-height: 1.2; }
 .st-gfx-phone-ios .st-gfx-source, .st-gfx-phone-ios .st-gfx-meta,
-.st-gfx-phone-android .st-gfx-source, .st-gfx-phone-android .st-gfx-meta { color: #475569; }
-.st-gfx-phone-rows { display: flex; flex-direction: column; gap: .38rem; padding: .72rem .65rem .85rem; }
+.st-gfx-phone-android .st-gfx-source, .st-gfx-phone-android .st-gfx-meta { flex: 0 0 auto; color: #475569; }
+.st-gfx-phone-ios .st-gfx-source, .st-gfx-phone-ios .st-gfx-meta { text-align: center; }
+.st-gfx-phone-ios .st-gfx-meta { justify-content: center; }
+.st-gfx-phone-ios .st-gfx-meta, .st-gfx-phone-android .st-gfx-meta { padding-bottom: .28rem; }
+.st-gfx-phone-rows { box-sizing: border-box; display: flex; flex: 1 1 auto; flex-direction: column; gap: .38rem; width: 100%; min-height: 0; padding: .72rem .65rem .85rem; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-color: rgba(100, 116, 139, .55) transparent; scrollbar-width: thin; background: #f2f2f7; }
+.st-gfx-phone-rows::-webkit-scrollbar { width: .28rem; }
+.st-gfx-phone-rows::-webkit-scrollbar-track { background: transparent; }
+.st-gfx-phone-rows::-webkit-scrollbar-thumb { border-radius: 999px; background: rgba(100, 116, 139, .48); }
+.st-gfx-phone-android .st-gfx-phone-rows { background: #f7f9fc; }
 .st-gfx-phone-ios .st-gfx-row, .st-gfx-phone-android .st-gfx-row {
+  box-sizing: border-box;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: .08rem .45rem;
   width: fit-content;
   max-width: 84%;
   padding: .48rem .68rem;
+  color: #1c1c1e;
   line-height: 1.28;
 }
-.st-gfx-phone-ios .st-gfx-row-label, .st-gfx-phone-android .st-gfx-row-label { grid-column: 1 / -1; font-size: .68rem; font-weight: 650; opacity: .72; }
+.st-gfx-phone-ios .st-gfx-row-label, .st-gfx-phone-android .st-gfx-row-label { grid-column: 1 / -1; color: inherit; font-size: .68rem; font-weight: 650; opacity: .76; }
 .st-gfx-phone-ios .st-gfx-row-value, .st-gfx-phone-android .st-gfx-row-value { grid-column: 1; }
-.st-gfx-phone-ios .st-gfx-row-time, .st-gfx-phone-android .st-gfx-row-time { grid-column: 2; align-self: end; opacity: .72; }
+.st-gfx-phone-ios .st-gfx-row-time, .st-gfx-phone-android .st-gfx-row-time { grid-column: 2; align-self: end; color: inherit; opacity: .72; }
 .st-gfx-phone-ios .st-gfx-row-role-left, .st-gfx-phone-ios .st-gfx-row-role-in,
-.st-gfx-phone-ios .st-gfx-row-role-received { align-self: flex-start; margin: 0; border-radius: 1rem 1rem 1rem .3rem; background: #e5e5ea; }
+.st-gfx-phone-ios .st-gfx-row-role-received { align-self: flex-start; margin: 0; border-radius: 1rem 1rem 1rem .3rem; background: #e5e5ea; color: #111113; }
 .st-gfx-phone-ios .st-gfx-row-role-right, .st-gfx-phone-ios .st-gfx-row-role-out,
-.st-gfx-phone-ios .st-gfx-row-role-sent { align-self: flex-end; margin: 0; border-radius: 1rem 1rem .3rem 1rem; background: #0a84ff; }
+.st-gfx-phone-ios .st-gfx-row-role-sent { align-self: flex-end; margin: 0; border-radius: 1rem 1rem .3rem 1rem; background: #006edc; color: #fff; }
 .st-gfx-phone-android .st-gfx-row-role-left, .st-gfx-phone-android .st-gfx-row-role-in,
-.st-gfx-phone-android .st-gfx-row-role-received { align-self: flex-start; margin: 0; border-radius: .35rem 1.1rem 1.1rem 1.1rem; background: #e2e8f0; }
+.st-gfx-phone-android .st-gfx-row-role-received { align-self: flex-start; margin: 0; border-radius: .35rem 1.1rem 1.1rem 1.1rem; background: #e1e7ed; color: #202124; }
 .st-gfx-phone-android .st-gfx-row-role-right, .st-gfx-phone-android .st-gfx-row-role-out,
-.st-gfx-phone-android .st-gfx-row-role-sent { align-self: flex-end; margin: 0; border-radius: 1.1rem .35rem 1.1rem 1.1rem; background: #c5e7ff; color: #102a43; }
+.st-gfx-phone-android .st-gfx-row-role-sent { align-self: flex-end; margin: 0; border-radius: 1.1rem .35rem 1.1rem 1.1rem; background: #c2e7ff; color: #0b3041; }
 .st-gfx-phone-layout-notification .st-gfx-rows { margin: .35rem; border: 1px solid rgba(148, 163, 184, .35); border-radius: 1rem; box-shadow: 0 .25rem .75rem rgba(15, 23, 42, .1); }
 .st-gfx-phone-layout-notification .st-gfx-header { border-left: .25rem solid #3b82f6; }
 .st-gfx-phone-layout-call .st-gfx-header { justify-content: center; padding-top: .8rem; }

@@ -75,6 +75,33 @@ test('phone bubbles follow explicit row roles and retain timestamps as text', ()
     assert.match(rows[0].textContent, /09:41/);
 });
 
+test('phone status metadata is rendered once in the status bar', () => {
+    const documentRef = documentFixture();
+    const overlay = new GfxOverlay({ document: documentRef, duration: 0 });
+    const card = overlay.show({
+        id: 'android-status', kind: 'phone', platform: 'android', title: 'Chat', source: 'Niko',
+        meta: { time: '09:41', battery: 'LTE 82%', subtitle: 'Encrypted' }, rows: ['Hello'],
+    });
+    const frame = card.children[0];
+    const status = frame.children.find((node) => node.className.includes('st-gfx-phone-status'));
+    const meta = frame.children.find((node) => node.className === 'st-gfx-meta');
+    assert.equal(status.textContent, '09:41LTE 82%');
+    assert.equal(meta.textContent, 'Encrypted');
+    assert.doesNotMatch(meta.textContent, /09:41|82%/);
+});
+
+test('iOS status bar owns cellular, wifi, and battery geometry', () => {
+    const documentRef = documentFixture();
+    const overlay = new GfxOverlay({ document: documentRef, duration: 0 });
+    const card = overlay.show({ id: 'ios-status', kind: 'phone', platform: 'ios', title: 'Messages', meta: { time: '09:41', battery: '87%' }, rows: ['Hello'] });
+    const status = card.children[0].children.find((node) => node.className.includes('st-gfx-phone-status'));
+    const indicators = status.children[1];
+    assert.equal(indicators.children.some((node) => node.className === 'st-gfx-ios-cellular'), true);
+    assert.equal(indicators.children.some((node) => node.className === 'st-gfx-ios-wifi'), true);
+    assert.equal(indicators.children.some((node) => node.className === 'st-gfx-ios-battery'), true);
+    assert.match(status.textContent, /09:41.*87/);
+});
+
 test('deduplicates IDs, bounds visible cards, and replaces branches', () => {
     const documentRef = documentFixture();
     const overlay = new GfxOverlay({ document: documentRef, maxVisible: 2, duration: 0, branchId: 'a' });

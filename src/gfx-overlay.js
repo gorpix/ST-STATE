@@ -59,6 +59,37 @@ function phonePlatform(value) {
     return token === 'iphone' ? 'ios' : token;
 }
 
+function phoneStatusDetails(event) {
+    const raw = text(event?.meta?.indicators ?? event?.meta?.battery ?? '').trim();
+    const battery = raw.match(/\b(100|[1-9]?\d)\s*%/)?.[1] ?? '';
+    const network = raw.match(/\b(5G|LTE|4G|3G|EDGE)\b/i)?.[1]?.toUpperCase() ?? '';
+    return { raw, battery, network, wifi: /wi[ -]?fi/i.test(raw) || !network };
+}
+
+function appendPhoneStatus(documentRef, frame, platform, event) {
+    const status = appendText(documentRef, frame, 'div', `st-gfx-phone-status st-gfx-phone-status-${platform}`);
+    appendText(documentRef, status, 'span', 'st-gfx-phone-time', event.meta?.time ?? event.time ?? '');
+    const details = phoneStatusDetails(event);
+    const indicators = appendText(documentRef, status, 'span', 'st-gfx-phone-indicators');
+    if (platform !== 'ios') {
+        indicators.textContent = details.raw;
+        return status;
+    }
+    const cellular = appendText(documentRef, indicators, 'span', 'st-gfx-ios-cellular');
+    cellular.setAttribute?.('aria-hidden', 'true');
+    for (let index = 1; index <= 4; index += 1) appendText(documentRef, cellular, 'i', `st-gfx-ios-cellular-bar st-gfx-ios-cellular-bar-${index}`);
+    if (details.network) appendText(documentRef, indicators, 'span', 'st-gfx-ios-network', details.network);
+    if (details.wifi) {
+        const wifi = appendText(documentRef, indicators, 'span', 'st-gfx-ios-wifi');
+        wifi.setAttribute?.('aria-hidden', 'true');
+    }
+    const battery = appendText(documentRef, indicators, 'span', 'st-gfx-ios-battery');
+    battery.setAttribute?.('aria-label', details.battery ? `Battery ${details.battery}%` : 'Battery');
+    appendText(documentRef, battery, 'span', 'st-gfx-ios-battery-level');
+    if (details.battery) appendText(documentRef, battery, 'span', 'st-gfx-ios-battery-text', details.battery);
+    return status;
+}
+
 function appendText(documentRef, parent, tag, className, value) {
     const node = documentRef.createElement(tag);
     if (className) node.className = className;
@@ -96,19 +127,23 @@ function appendRow(documentRef, list, row, index) {
     return item;
 }
 
-function appendMeta(documentRef, card, event) {
+const PHONE_STATUS_META_KEYS = new Set(['time', 'battery', 'indicators', 'signal']);
+
+function appendMeta(documentRef, card, event, { phone = false } = {}) {
     const source = event?.source ?? event?.origin ?? event?.from;
     if (source !== undefined && text(source) !== '') appendText(documentRef, card, 'div', 'st-gfx-source', source);
     const metadataInput = event?.meta && typeof event.meta === 'object' && !Array.isArray(event.meta) ? event.meta : {};
     const metadataValues = { ...metadataInput };
+    if (phone) for (const key of PHONE_STATUS_META_KEYS) delete metadataValues[key];
     for (const key of ['actor', 'position', 'subtitle']) if (event?.[key] !== undefined && metadataValues[key] === undefined) metadataValues[key] = event[key];
     const meta = Object.keys(metadataValues).length ? metadataValues : event?.meta;
     if (meta === undefined || meta === null || meta === '') return;
     const metadata = appendText(documentRef, card, 'div', 'st-gfx-meta');
     if (meta && typeof meta === 'object' && !Array.isArray(meta)) {
         for (const [key, value] of Object.entries(meta)) {
-            const entry = appendText(documentRef, metadata, 'span', 'st-gfx-meta-item');
-            appendText(documentRef, entry, 'span', 'st-gfx-meta-label', key);
+            const subtitle = phone && key === 'subtitle';
+            const entry = appendText(documentRef, metadata, 'span', `st-gfx-meta-item${subtitle ? ' st-gfx-meta-subtitle' : ''}`);
+            if (!subtitle) appendText(documentRef, entry, 'span', 'st-gfx-meta-label', key);
             appendText(documentRef, entry, 'span', 'st-gfx-meta-value', value);
         }
     } else appendText(documentRef, metadata, 'span', 'st-gfx-meta-value', meta);
@@ -235,15 +270,13 @@ export class GfxOverlay {
         const frame = phone ? appendText(this.document, card, 'div', `st-gfx-phone-shell st-gfx-phone-${platform} st-gfx-phone-layout-${layout}`) : card;
         if (phone) {
             appendText(this.document, frame, 'div', `st-gfx-phone-notch st-gfx-phone-notch-${platform}`);
-            const status = appendText(this.document, frame, 'div', `st-gfx-phone-status st-gfx-phone-status-${platform}`);
-            appendText(this.document, status, 'span', 'st-gfx-phone-time', event.meta?.time ?? event.time ?? '');
-            appendText(this.document, status, 'span', 'st-gfx-phone-indicators', event.meta?.indicators ?? event.meta?.battery ?? '');
+            appendPhoneStatus(this.document, frame, platform, event);
         }
         const heading = event.title ?? event.name ?? event.label ?? 'In-world artifact';
         const header = appendText(this.document, frame, 'header', 'st-gfx-header');
         appendText(this.document, header, 'span', 'st-gfx-kind', MEDIA_KINDS.has(classToken(kind)) ? classToken(kind) : 'artifact');
         appendText(this.document, header, 'h2', 'st-gfx-title', heading);
-        appendMeta(this.document, frame, event);
+        appendMeta(this.document, frame, event, { phone });
 
         const rows = rowEntries(event);
         if (rows.length) {

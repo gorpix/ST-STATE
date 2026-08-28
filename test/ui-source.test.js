@@ -29,3 +29,10 @@ test('settings panel exposes local GFX controls and both phone previews', async 
     for (const callback of ['getGfxSettings', 'setGfxSettings', 'onPreviewGfx']) assert.match(source, new RegExp(callback));
     assert.match(source, /durationMs/);
 });
+
+test('phone skins retain a fixed device ratio with a scrolling content viewport', async () => {
+    const source = await readFile(new URL('../style.css', import.meta.url), 'utf8');
+    assert.match(source, /aspect-ratio:\s*9\s*\/\s*19\.5/);
+    assert.match(source, /\.st-gfx-phone-rows[^}]*min-height:\s*0[^}]*overflow-y:\s*auto/s);
+    assert.match(source, /width:\s*min\(18rem, 100%, calc\(46\.1538dvh - 2\.54rem\)\)/);
+});
