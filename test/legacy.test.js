@@ -93,3 +93,12 @@ test('strict import accepts an omitted optional World Sim and preserves prior op
     assert.equal(imported.state.opaque.legacy.worldSimRaw, base.opaque.legacy.worldSimRaw);
 });
 
+test('legacy scene positions accept known actor prefixes without colon delimiters', () => {
+    const source = fixture.replace('Positions: Alice: Lantern Room; Bob: Lantern Room', 'Positions: Alice beside the lantern; Bob watching from the doorway');
+    const imported = importLegacyState(source, { requireComplete: true });
+    assert.equal(imported.ok, true);
+    assert.equal(imported.state.scene.positions.AL, 'beside the lantern');
+    assert.equal(imported.state.scene.positions.BO, 'watching from the doorway');
+    assert.deepEqual(Object.keys(imported.state.actors).sort(), ['AL', 'BO']);
+});
+

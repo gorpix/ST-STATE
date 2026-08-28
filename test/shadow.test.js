@@ -71,6 +71,24 @@ test('relationship claims participate in Shadow parity', () => {
     assert.ok(!report.unsupportedDomains.includes('relations'));
 });
 
+test('legacy punctuation variants match while changed words still diverge', () => {
+    const authoritative = createEmptyState({ now: 1 });
+    authoritative.ct = 2; authoritative.meta.ct = 2;
+    authoritative.scene.openBeat = 'session-2 — door-check';
+    authoritative.scene.positions = { AL: 'center-floor' };
+    const candidate = structuredClone(authoritative);
+    candidate.scene.openBeat = 'Session 2 - door check';
+    candidate.scene.positions.AL = 'center floor';
+    const patch = { ops: [{ op: 'scene.set', set: { openBeat: candidate.scene.openBeat, positions: candidate.scene.positions } }] };
+    const paths = shadowClaimedPaths(patch);
+    assert.deepEqual(paths, ['ct', 'scene.openBeat', 'scene.positions.AL']);
+    assert.equal(compareShadowParity(authoritative, candidate, { patch }).status, 'match');
+    candidate.scene.openBeat = 'session 2 window check';
+    const report = compareShadowParity(authoritative, candidate, { patch });
+    assert.equal(report.status, 'diverged');
+    assert.deepEqual(report.mismatches.map((item) => item.path), ['scene.openBeat']);
+});
+
 test('shadow handshake exposes the evaluator contract and exact control markers', () => {
     const state = createEmptyState({ now: 1 });
     const text = shadowHandshake(state);

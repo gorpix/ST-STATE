@@ -110,6 +110,23 @@ function actorComparablePath(id, field) {
     return `actors.${id}.${field}`;
 }
 
+function semanticParityEqual(left, right) {
+    if (typeof left === 'string' && typeof right === 'string') {
+        const normalize = (value) => value.normalize('NFKC')
+            .toLowerCase()
+            .replace(/[‐‑‒–—―−-]+/g, ' ')
+            .replace(/[“”]/g, '"')
+            .replace(/[‘’]/g, "'")
+            .replace(/\s+/g, ' ')
+            .trim();
+        return normalize(left) === normalize(right);
+    }
+    if (Array.isArray(left) && Array.isArray(right)) {
+        return left.length === right.length && left.every((value, index) => semanticParityEqual(value, right[index]));
+    }
+    return deepEqual(left, right);
+}
+
 /** Return only semantic paths explicitly claimed by a candidate delta. */
 export function shadowClaimedPaths(patch) {
     const paths = new Set(['ct']);
@@ -120,7 +137,11 @@ export function shadowClaimedPaths(patch) {
             paths.add(`actors.${operation.id}.id`);
             for (const field of Object.keys(operation.actor ?? {})) paths.add(actorComparablePath(operation.id, field));
         } else if (operation?.op === 'scene.set') {
-            for (const field of Object.keys(operation.set ?? {})) paths.add(`scene.${field}`);
+            for (const [field, value] of Object.entries(operation.set ?? {})) {
+                if (field === 'positions' && value && typeof value === 'object' && !Array.isArray(value)) {
+                    for (const id of Object.keys(value)) paths.add(`scene.positions.${id}`);
+                } else paths.add(`scene.${field}`);
+            }
         } else if (operation?.op === 'relation.set') {
             for (const field of Object.keys(operation.set ?? {})) paths.add(`relations.pairs.${operation.a}|${operation.b}.${field}`);
         }
@@ -165,7 +186,7 @@ export function compareShadowParity(authoritative, candidate, { patchStatus = 'c
     const mismatches = [];
     const matches = [];
     for (const path of paths) {
-        if (deepEqual(expectedFlat[path], actualFlat[path])) matches.push(path);
+        if (semanticParityEqual(expectedFlat[path], actualFlat[path])) matches.push(path);
         else mismatches.push({ path, expected: deepClone(expectedFlat[path]), actual: deepClone(actualFlat[path]) });
     }
     const unsupported = [...UNSUPPORTED_ROOTS];
