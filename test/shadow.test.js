@@ -55,6 +55,22 @@ test('delta parity compares only candidate-claimed paths and their aliases', () 
     assert.doesNotMatch(JSON.stringify(report), /focus/);
 });
 
+test('relationship claims participate in Shadow parity', () => {
+    const authoritative = createEmptyState({ now: 1 });
+    authoritative.ct = 1; authoritative.meta.ct = 1;
+    authoritative.relations.pairs['US|AL'] = { a: 'US', b: 'AL', bond: 5, sparks: 2, grudge: 0 };
+    const candidate = structuredClone(authoritative);
+    candidate.relations.pairs['US|AL'].bond = 4;
+    const patch = { ops: [{ op: 'relation.set', a: 'US', b: 'AL', set: { bond: 4 } }] };
+    const paths = shadowClaimedPaths(patch);
+    assert.deepEqual(paths, ['ct', 'relations.pairs.US|AL.bond']);
+    const report = compareShadowParity(authoritative, candidate, { patch });
+    assert.equal(report.status, 'diverged');
+    assert.deepEqual(report.mismatches, [{ path: 'relations.pairs.US|AL.bond', expected: 5, actual: 4 }]);
+    assert.ok(report.supportedRoots.includes('relations'));
+    assert.ok(!report.unsupportedDomains.includes('relations'));
+});
+
 test('shadow handshake exposes the evaluator contract and exact control markers', () => {
     const state = createEmptyState({ now: 1 });
     const text = shadowHandshake(state);
@@ -69,7 +85,7 @@ test('shadow handshake exposes the evaluator contract and exact control markers'
         'flash=flash_handoff',
         'stateCt=0',
         'stateHead=GENESIS',
-        'features=actor,scene',
+        'features=actor,scene,relation',
         'END_ST_STATE_HANDSHAKE',
     ].join('\n'));
 });

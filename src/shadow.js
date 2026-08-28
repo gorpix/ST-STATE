@@ -1,7 +1,7 @@
 import { deepClone, deepEqual, stableHash } from './util.js';
 
 /** Fields that the evaluative patch contract can compare safely. */
-export const SHADOW_SUPPORTED_ROOTS = Object.freeze(['ct', 'actors', 'scene']);
+export const SHADOW_SUPPORTED_ROOTS = Object.freeze(['ct', 'actors', 'scene', 'relations']);
 export const SHADOW_ACTOR_FIELDS = Object.freeze([
     'id', 'name', 'displayName', 'at', 'location', 'position', 'doing', 'activity',
     'agenda', 'agendaGoal', 'agendaStep', 'agendaMax', 'valence', 'arousal', 'dominance',
@@ -10,7 +10,7 @@ export const SHADOW_ACTOR_FIELDS = Object.freeze([
 export const SHADOW_SCENE_FIELDS = Object.freeze(['spotlight', 'openBeat', 'timePressure', 'environment', 'positions', 'time']);
 
 const UNSUPPORTED_ROOTS = Object.freeze([
-    'meta', 'head', 'schemaVersion', 'version', 'factions', 'relations', 'residue', 'quests',
+    'meta', 'head', 'schemaVersion', 'version', 'factions', 'residue', 'quests',
     'inventory', 'chekhov', 'thoughts', 'notebook', 'lastDnd', 'clocks', 'knowledge',
     'commitments', 'artifacts', 'worldSim', 'opaque', 'history', 'dedupe', 'branches',
 ]);
@@ -64,6 +64,20 @@ function comparableScene(scene, state) {
     return result;
 }
 
+function comparableRelations(relations) {
+    const pairs = {};
+    for (const [key, relation] of Object.entries(relations?.pairs ?? {}).sort(([left], [right]) => left.localeCompare(right))) {
+        pairs[key] = {
+            a: relation.a,
+            b: relation.b,
+            bond: relation.bond,
+            sparks: relation.sparks,
+            grudge: relation.grudge,
+        };
+    }
+    return { pairs };
+}
+
 export function shadowComparable(state) {
     const source = state && typeof state === 'object' ? state : {};
     return {
@@ -71,6 +85,7 @@ export function shadowComparable(state) {
         actors: Object.fromEntries(Object.entries(source.actors ?? {}).sort(([left], [right]) => left.localeCompare(right))
             .map(([id, actor]) => [id, comparableActor(actor, id)])),
         scene: comparableScene(source.scene, source),
+        relations: comparableRelations(source.relations),
     };
 }
 
@@ -106,6 +121,8 @@ export function shadowClaimedPaths(patch) {
             for (const field of Object.keys(operation.actor ?? {})) paths.add(actorComparablePath(operation.id, field));
         } else if (operation?.op === 'scene.set') {
             for (const field of Object.keys(operation.set ?? {})) paths.add(`scene.${field}`);
+        } else if (operation?.op === 'relation.set') {
+            for (const field of Object.keys(operation.set ?? {})) paths.add(`relations.pairs.${operation.a}|${operation.b}.${field}`);
         }
     }
     return [...paths].sort();
@@ -162,7 +179,6 @@ export function compareShadowParity(authoritative, candidate, { patchStatus = 'c
         patchStatus: String(patchStatus),
         supportedRoots: [...SHADOW_SUPPORTED_ROOTS],
         supportedPaths: paths,
-        supportedPaths: paths,
         matches,
         mismatches,
         unsupported,
@@ -211,7 +227,7 @@ export function shadowHandshake(state, { mode = 'SHADOW' } = {}) {
         'flash=flash_handoff',
         `stateCt=${Number.isInteger(current.ct) ? current.ct : 0}`,
         `stateHead=${String(current.head ?? '')}`,
-        'features=actor,scene',
+        'features=actor,scene,relation',
         'END_ST_STATE_HANDSHAKE',
     ].join('\n');
 }

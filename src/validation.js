@@ -19,6 +19,8 @@ const ENVELOPE_KEYS = new Set(['version', 'base', 'head', 'mode', 'ops', 'tx', '
 const ACTOR_OP_KEYS = new Set(['op', 'id', 'field', 'value', 'set', 'fields']);
 const CREATE_OP_KEYS = new Set(['op', 'id', 'actor', 'set', 'fields']);
 const SCENE_OP_KEYS = new Set(['op', 'field', 'value', 'set', 'fields']);
+const RELATION_OP_KEYS = new Set(['op', 'a', 'b', 'field', 'value', 'set', 'fields']);
+const RELATION_FIELDS = Object.freeze(['bond', 'sparks', 'grudge']);
 
 function fail(errors, path, message) {
     errors.push(`${path}: ${message}`);
@@ -182,6 +184,22 @@ function assignSceneField(fields, field, value, path, errors) {
     if (normalized !== undefined) fields[canonicalField] = normalized;
 }
 
+function assignRelationField(fields, field, value, path, errors) {
+    const canonicalField = RELATION_FIELDS.find((candidate) => normalizeFieldTerm(candidate) === normalizeFieldTerm(field));
+    if (!canonicalField) {
+        fail(errors, path, `field "${field}" is not allowlisted`);
+        return;
+    }
+    const number = typeof value === 'number' ? value : (/^-?\d+$/.test(String(value).trim()) ? Number(value) : Number.NaN);
+    const minimum = canonicalField === 'bond' ? -5 : 0;
+    const maximum = canonicalField === 'bond' ? 20 : 100;
+    if (!Number.isInteger(number) || number < minimum || number > maximum) {
+        fail(errors, path, `must be an integer from ${minimum} through ${maximum}`);
+        return;
+    }
+    fields[canonicalField] = number;
+}
+
 function extractOperationFields(operation, path, allowedKeys, errors) {
     checkKeys(operation, allowedKeys, path, errors);
     const hasSet = hasOwn(operation, 'set') || hasOwn(operation, 'fields');
@@ -263,6 +281,21 @@ function normalizeOperation(operation, index, knownActors, errors) {
             assignSceneField(set, operation.field, operation.value, `${path}.value`, errors);
         }
         return { op: operation.op, set };
+    }
+    if (operation.op === 'relation.set') {
+        const { hasSet, hasField, setValue } = extractOperationFields(operation, path, RELATION_OP_KEYS, errors);
+        for (const side of ['a', 'b']) {
+            if (!isValidActorId(operation[side])) fail(errors, `${path}.${side}`, 'must be a two-letter uppercase actor ID');
+            else if (!knownActors.has(operation[side])) fail(errors, `${path}.${side}`, 'actor does not exist in the base state or an earlier actor.create');
+        }
+        if (operation.a === operation.b) fail(errors, path, 'relation endpoints must be different actors');
+        const set = {};
+        if (hasSet && isPlainObject(setValue)) {
+            const entries = prepareFieldEntries(setValue, (field) => RELATION_FIELDS.find((candidate) => normalizeFieldTerm(candidate) === normalizeFieldTerm(field)), path, errors);
+            for (const entry of entries) assignRelationField(set, entry.field, entry.value, `${path}.set.${entry.field}`, errors);
+        }
+        if (hasField) assignRelationField(set, operation.field, operation.value, `${path}.value`, errors);
+        return { op: operation.op, a: operation.a, b: operation.b, set };
     }
     fail(errors, path, `unknown operation "${operation.op}"`);
     return null;

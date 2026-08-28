@@ -270,7 +270,7 @@ export function renderShadowParity(container, report) {
     container.setAttribute('role', 'status');
     container.setAttribute('aria-live', 'polite');
     container.append(element('div', 'st-parity-result', title), element('div', 'st-parity-summary', summary));
-    appendLabelValue(container, 'Supported', (value.supportedRoots ?? ['ct', 'actors', 'scene']).join(', '));
+    appendLabelValue(container, 'Supported', (value.supportedRoots ?? ['ct', 'actors', 'scene', 'relations']).join(', '));
     appendLabelValue(container, 'Matches', matches);
     appendLabelValue(container, 'Divergences', divergences);
     appendLabelValue(container, 'Candidate', candidateStatus);

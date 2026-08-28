@@ -117,6 +117,25 @@ test('NORMAL actor/scene operations commit atomically and increment ct once', ()
     assert.equal(reverted.scene.openBeat, before.scene.openBeat);
 });
 
+test('relation updates validate ranges and commit atomically', () => {
+    const before = state();
+    const patch = { version: 2, base: before.head, mode: 'NORMAL', tx: 'relation-turn', ops: [
+        { op: 'relation.set', a: 'US', b: 'AL', set: { Bond: '5', Sparks: 3, Grudge: 1 } },
+    ] };
+    const validated = validatePatchEnvelope(patch, { state: before });
+    assert.equal(validated.ok, true);
+    assert.deepEqual(validated.value.ops[0], { op: 'relation.set', a: 'US', b: 'AL', set: { bond: 5, sparks: 3, grudge: 1 } });
+    const committed = applyTransaction(before, patch, { messageIdentity: 'relation-message', now: 2 });
+    assert.equal(committed.status, 'committed');
+    assert.deepEqual(committed.state.relations.pairs['US|AL'], { ...before.relations.pairs['US|AL'], bond: 5, sparks: 3, grudge: 1 });
+    const badRange = validatePatchEnvelope({ ...patch, ops: [{ op: 'relation.set', a: 'US', b: 'AL', field: 'bond', value: 21 }] }, { state: before });
+    assert.equal(badRange.ok, false);
+    assert.ok(badRange.errors.some((error) => /-5 through 20/.test(error)));
+    const unknownActor = validatePatchEnvelope({ ...patch, ops: [{ op: 'relation.set', a: 'US', b: 'ZZ', field: 'bond', value: 1 }] }, { state: before });
+    assert.equal(unknownActor.ok, false);
+    assert.ok(unknownActor.errors.some((error) => /actor does not exist/.test(error)));
+});
+
 test('stale base and duplicate transaction do not mutate state', () => {
     const before = state();
     const patch = { version: 2, base: before.head, mode: 'NORMAL', tx: 'same', ops: [{ op: 'scene.set', set: { openBeat: 'x' } }] };

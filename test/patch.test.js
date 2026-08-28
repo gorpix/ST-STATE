@@ -32,6 +32,13 @@ test('parses line patches without JSON escaping and preserves pipes and quotes i
     assert.equal(result.prose, 'Reply.\n');
 });
 
+test('parses and groups line-based relationship updates', () => {
+    const text = `<!--ST_PATCH\nV2\nbase=h-4\nmode=NORMAL\ntx=turn-5\nrelation.set|US|AL|bond|4\nrelation.set|US|AL|sparks|2\nrelation.set|US|AL|grudge|1\n-->`;
+    const result = extractHiddenPatch(text);
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.patch.ops, [{ op: 'relation.set', a: 'US', b: 'AL', set: { bond: 4, sparks: 2, grudge: 1 } }]);
+});
+
 test('flash handoff freezes and is removed from display', () => {
     assert.equal(hasFlashHandoff('ordinary <flash_handoff reason="zoom"/> prose'), true);
     assert.equal(removeControlPayload('ordinary <flash_handoff reason="zoom"/> prose'), 'ordinary  prose');

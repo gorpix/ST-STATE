@@ -79,6 +79,21 @@ function applyOperations(state, operations) {
             result.actors[operation.id] = { id: operation.id, ...deepClone(operation.actor) };
         } else if (operation.op === 'scene.set') {
             for (const [field, value] of Object.entries(operation.set)) result.scene[field] = deepClone(value);
+        } else if (operation.op === 'relation.set') {
+            const key = relationKey(operation.a, operation.b);
+            if (!isPlainObject(result.relations?.pairs)) result.relations = { pairs: {}, profiles: {} };
+            if (!isPlainObject(result.relations.pairs[key])) {
+                result.relations.pairs[key] = {
+                    a: operation.a,
+                    b: operation.b,
+                    labelA: result.actors[operation.a]?.name ?? operation.a,
+                    labelB: result.actors[operation.b]?.name ?? operation.b,
+                    bond: 0,
+                    sparks: 0,
+                    grudge: 0,
+                };
+            }
+            for (const [field, value] of Object.entries(operation.set)) result.relations.pairs[key][field] = value;
         } else {
             throw new Error(`Unsupported operation ${operation.op}`);
         }

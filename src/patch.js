@@ -9,7 +9,7 @@ function jsonCandidate(body) {
     return value;
 }
 
-const NUMERIC_PATCH_FIELDS = new Set(['valence', 'arousal', 'dominance', 'agendaStep', 'agendaMax']);
+const NUMERIC_PATCH_FIELDS = new Set(['valence', 'arousal', 'dominance', 'agendaStep', 'agendaMax', 'bond', 'sparks', 'grudge']);
 
 function lineValue(field, value) {
     const text = String(value ?? '').trim();
@@ -26,6 +26,7 @@ function parseLinePatch(candidate) {
     const actorSets = new Map();
     const sceneSet = {};
     const positions = {};
+    const relationSets = new Map();
     for (const line of lines.slice(1)) {
         const equals = line.indexOf('=');
         if (equals > 0 && !line.includes('|')) {
@@ -58,10 +59,21 @@ function parseLinePatch(candidate) {
             positions[parts[1].trim()] = parts.slice(2).join('|').trim();
             continue;
         }
+        if (operation === 'relation.set') {
+            if (parts.length < 5) throw new Error(`Malformed ST_PATCH line: ${line}`);
+            const a = parts[1].trim();
+            const b = parts[2].trim();
+            const field = parts[3].trim();
+            const key = `${a}|${b}`;
+            if (!relationSets.has(key)) relationSets.set(key, { a, b, set: {} });
+            relationSets.get(key).set[field] = lineValue(field, parts.slice(4).join('|'));
+            continue;
+        }
         throw new Error(`Unknown ST_PATCH line: ${line}`);
     }
     for (const [id, actor] of creates) patch.ops.push({ op: 'actor.create', id, actor });
     for (const [id, set] of actorSets) patch.ops.push({ op: 'actor.set', id, set });
+    for (const relation of relationSets.values()) patch.ops.push({ op: 'relation.set', ...relation });
     if (Object.keys(positions).length) sceneSet.positions = positions;
     if (Object.keys(sceneSet).length) patch.ops.push({ op: 'scene.set', set: sceneSet });
     return patch;
