@@ -63,6 +63,29 @@ test('Hybrid Native commits an authoritative patch without a full legacy block',
     assert.equal(context.chatMetadata.stStateShadow, undefined);
 });
 
+test('Hybrid Native bootstraps first-turn user and card identities before prompt injection', async () => {
+    const { context, engine, store } = setup();
+    context.name1 = 'Janko Makar';
+    context.name2 = 'Nicholas Snickerson';
+    context.chatMetadata.stState = createEmptyState({ now: 1 });
+    setChatMode(context.chatMetadata, 'NATIVE');
+    const injected = await engine.injectPrompt('normal', { bootstrapNpcNames: ['Nicholas Snickerson'] });
+    assert.equal(injected.injected, true);
+    assert.equal(store.load().ct, 0);
+    assert.equal(store.load().head, 'GENESIS');
+    assert.equal(store.load().actors.US.name, 'Janko Makar');
+    assert.equal(store.load().actors.NS.name, 'Nicholas Snickerson');
+    assert.match(injected.text, /\"id\":\"US\"/);
+    assert.match(injected.text, /\"id\":\"NS\"/);
+    assert.match(injected.text, /including identity-only first-turn bootstrap rows/);
+
+    const message = { is_user: false, mes: 'Visible <!--ST_PATCH\nV2\nbase=GENESIS\nmode=NORMAL\ntx=first-native\nactor.set|US|doing|Watching Nick unpack\nactor.set|NS|doing|Unpacking\nrelation.set|US|NS|bond|0\nscene.position|NS|By the bed\n-->' };
+    const result = await engine.processAssistantMessage(message, { index: 0, messageIdentity: 'first-native-message' });
+    assert.equal(result.status, 'native_committed');
+    assert.equal(store.load().ct, 1);
+    assert.equal(store.load().actors.NS.doing, 'Unpacking');
+});
+
 test('Hybrid Native merges only changed unsupported compatibility sections before its patch', async () => {
     const { context, engine, store } = setup();
     setChatMode(context.chatMetadata, 'NATIVE');

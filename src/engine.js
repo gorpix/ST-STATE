@@ -2,7 +2,7 @@ import { ChatSwitchError } from './store.js';
 import { applyTransaction, makeDiff, summarizeDiff } from './reducer.js';
 import { buildProtocolPrompt } from './selector.js';
 import { extractHiddenPatch, messageText, stripMessageControlPayload } from './patch.js';
-import { transactionIdentity } from './identity.js';
+import { makeStableActorId, transactionIdentity } from './identity.js';
 import { extractLatestInternalStates, importLegacyState, stripMessageInternalStatesPayload } from './legacy.js';
 import { DiagnosticLog } from './diagnostics.js';
 import { CHAT_CONFIG_KEY, DEFAULT_ENGINE_MODE, ENGINE_MODES, getChatMode, getGlobalDefaultMode, normalizeEngineMode } from './modes.js';
@@ -46,6 +46,28 @@ function requestedMode(adapter) {
 function canonicalMode(adapter) {
     const requested = requestedMode(adapter);
     return normalizeEngineMode(requested);
+}
+
+function bootstrapNativeActors(state, { userName = '', npcNames = [] } = {}) {
+    const source = deepClone(state);
+    if (source.ct !== 0 || source.head !== 'GENESIS') return { changed: false, state: source, actorIds: [] };
+    const actorIds = [];
+    const cleanUserName = sanitizePlainText(userName, { maxLength: 200, preserveNewlines: false });
+    if (!source.actors.US) {
+        source.actors.US = { id: 'US', name: cleanUserName || '{{user}}' };
+        actorIds.push('US');
+    }
+    const seenNames = new Set(Object.values(source.actors).map((actor) => String(actor?.name ?? '').trim().toLowerCase()).filter(Boolean));
+    for (const rawName of Array.isArray(npcNames) ? npcNames : [npcNames]) {
+        const name = sanitizePlainText(rawName, { maxLength: 200, preserveNewlines: false });
+        if (!name || name.toLowerCase() === cleanUserName.toLowerCase() || seenNames.has(name.toLowerCase())) continue;
+        const id = makeStableActorId(name, source.actors);
+        source.actors[id] = { id, name };
+        seenNames.add(name.toLowerCase());
+        actorIds.push(id);
+        if (actorIds.length >= 13) break;
+    }
+    return { changed: actorIds.length > 0, state: source, actorIds };
 }
 
 const NATIVE_COMPATIBILITY_ROOTS = Object.freeze([
@@ -182,7 +204,7 @@ export class STStateEngine {
     }
 
     buildPrompt(options = {}) {
-        const state = this.loadState({ initialize: false });
+        let state = this.loadState({ initialize: false });
         const userText = options.userText ?? this.latestUserText();
         const mode = String(options.mode ?? this.getMode()).trim().toUpperCase();
         return buildProtocolPrompt(state, { ...options, userText, mode });
@@ -210,7 +232,7 @@ export class STStateEngine {
             this.diagnostics.info('MODE_NO_INJECT', `Prompt injection disabled in ${mode} mode`);
             return { injected: false, skipped: true, type: generationType, mode, reason };
         }
-        const state = this.loadState({ initialize: false });
+        let state = this.loadState({ initialize: false });
         if (mode === 'SHADOW') {
             const baseline = options.verifiedBranchBaseline === true
                 ? { status: 'verified_branch', ready: true }
@@ -232,7 +254,22 @@ export class STStateEngine {
             }
         }
         try {
-            const prompt = this.buildPrompt({ ...options, mode });
+            let promptOptions = { ...options, mode };
+            if (mode === 'NATIVE') {
+                const bootstrap = bootstrapNativeActors(state, {
+                    userName: this.adapter?.getUserName?.(),
+                    npcNames: options.bootstrapNpcNames,
+                });
+                if (bootstrap.changed) {
+                    state = await this.store.save(bootstrap.state, { expectedChatId: this.adapter?.getChatId?.() });
+                    promptOptions = {
+                        ...promptOptions,
+                        mentionedActorIds: [...new Set([...(options.mentionedActorIds ?? []), ...bootstrap.actorIds])],
+                    };
+                    this.diagnostics.info('NATIVE_BOOTSTRAP', 'Hybrid Native initialized first-turn actor identities.', { actorIds: bootstrap.actorIds });
+                }
+            }
+            const prompt = this.buildPrompt(promptOptions);
             this.adapter.setPrompt(prompt.text);
             this.diagnostics.info('PROMPT_INJECTED', `${mode === 'NATIVE' ? 'Hybrid Native' : 'Shadow'} protocol injected for ${generationType}`, { selected: prompt.selection.selectedActorIds, mode });
             return { injected: true, skipped: false, type: generationType, mode, selection: prompt.selection, text: prompt.text };
