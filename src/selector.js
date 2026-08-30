@@ -164,7 +164,7 @@ export function buildProtocolPrompt(state, options = {}) {
         const protocol = [
             shadowHandshake(state, { mode }),
             'ST-STATE HYBRID NATIVE TRANSACTION PROTOCOL v1',
-            'Write ordinary visible prose first. Never output the full legacy state. Append exactly one hidden ST_PATCH on every NORMAL turn; it is authoritative and is applied atomically by ST-STATE.',
+            'For every NORMAL RP response, begin with the exact header required by the active preset, then write ordinary visible prose. Never place prose, compatibility state, ST_PATCH, or ST_GFX before that header. Never output the full legacy state. Append exactly one hidden ST_PATCH on every NORMAL turn; it is authoritative and is applied atomically by ST-STATE.',
             'Patch transport is line-based, never JSON. Headers: V2, base=<current head>, mode=NORMAL, tx=<short stable turn identity>. Do not use braces, commas, JSON quoting, markdown fences, or an END line.',
             'Allowed native data lines only: actor.set|ID|field|value ; actor.create|ID|field|value ; scene.set|field|value ; scene.position|ID|value ; relation.set|A|B|bond|value ; relation.set|A|B|sparks|value ; relation.set|A|B|grudge|value. Emit only fields changed this turn; a zero-delta NORMAL patch still advances ct exactly once.',
             'Copy actor IDs exactly from ST_LOCAL_FRAME. Patch VAD valence/arousal/dominance must each be finite numbers from -2..2. Relationship ranges: bond -5..20; sparks and grudge 0..100.',
@@ -183,7 +183,7 @@ export function buildProtocolPrompt(state, options = {}) {
     const protocol = [
         shadowHandshake(state, { mode }),
         'ST-STATE SHADOW TRANSACTION PROTOCOL v1',
-        'Write ordinary prose first. Include an <internal_states> block with the next Turn header, then append exactly one hidden HTML comment with the line-based semantic patch.',
+        'For every NORMAL RP response, begin with the exact header required by the active preset, then write ordinary visible prose. Never place prose, legacy state, ST_PATCH, or ST_GFX before that header. Include an <internal_states> block with the next Turn header, then append exactly one hidden HTML comment with the line-based semantic patch.',
         'The <internal_states> block is authoritative for this turn. Include NPC STATE, BONDS, and SCENE & WORLD on every NORMAL turn; include any other legacy section that changed. Omitted sections and omitted cold actor/relation/position rows are carried forward unchanged. Present rows are authoritative; an explicit - None clears its section. ST_PATCH is an evaluation candidate only; it is never authoritative and never overwrites the canonical state.',
         'Patch transport is line-based, never JSON. Headers: V2, base=<current head>, mode=NORMAL, tx=<short stable turn identity>. Do not use braces, commas, JSON quoting, markdown fences, or an END line.',
         'NORMAL is the only state-bearing route. OOC and FLASH emit prose or handoff only: no legacy block and no ST_PATCH. If <flash_handoff .../> is present, FLASH wins.',

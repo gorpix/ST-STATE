@@ -1,4 +1,4 @@
-# ST-STATE v0.4.0-eval.4
+# ST-STATE v0.4.0-eval.5
 
 Browser-only, third-party [SillyTavern](https://docs.sillytavern.app/for-contributors/writing-extensions/) UI extension for ST-ENDGAME's durable state ledger and local in-world artifact renderer. It keeps canonical per-chat JSON in `chatMetadata.stState`, per-chat mode configuration in `chatMetadata.stStateConfig`, shadow parity in `chatMetadata.stStateShadow`, branch checkpoints in `chatMetadata.stStateBranches`, global preferences in `extensionSettings.stState`, and accepts the evaluative `ST_PATCH` and `ST_GFX` hidden line controls.
 

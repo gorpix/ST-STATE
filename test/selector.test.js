@@ -31,6 +31,8 @@ test('hot selector includes exact mentions, spotlight/on-screen actors, and dire
 
 test('protocol keeps an ordinary zero-delta RP turn NORMAL', () => {
     const prompt = buildProtocolPrompt(createEmptyState({ now: 1 })).text;
+    assert.match(prompt, /begin with the exact header required by the active preset/);
+    assert.match(prompt, /Never place prose, legacy state, ST_PATCH, or ST_GFX before that header/);
     assert.match(prompt, /Ordinary RP always uses NORMAL, even with no data lines/);
     assert.match(prompt, /Use OOC only for an out-of-character answer/);
     assert.match(prompt, /valence, arousal, and dominance must each be finite numbers clamped to -2\.\.2/);
@@ -57,6 +59,8 @@ test('Hybrid Native injects local frame, authoritative patch rules, compatibilit
     assert.match(prompt.text, /ST_LOCAL_FRAME v1/);
     assert.match(prompt.text, /ST_DICE_POOL v1\nAL\|d20\|14\nEND_ST_DICE_POOL/);
     assert.match(prompt.text, /Never output the full legacy state/);
+    assert.match(prompt.text, /begin with the exact header required by the active preset/);
+    assert.match(prompt.text, /Never place prose, compatibility state, ST_PATCH, or ST_GFX before that header/);
     assert.match(prompt.text, /only those changed sections/);
     assert.match(prompt.text, /exactly one hidden ST_PATCH/);
     assert.doesNotMatch(formatDicePool(prompt.selection, { rollProvider: () => 9 }), /US\|d20/);
