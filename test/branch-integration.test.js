@@ -10,9 +10,11 @@ import {
     handleMessageReceived,
     handleMessageSwiped,
     handleMessageSwipeDeleted,
+    prepareSwipeGenerationBaseline,
     rebaselineSelectedBranch,
     restorePreviousState,
     runtimeState,
+    stStateGenerateInterceptor,
 } from '../src/main.js';
 import { getChatMode, setChatMode } from '../src/modes.js';
 import { createEmptyState } from '../src/schema.js';
@@ -115,6 +117,62 @@ test('new and existing swipes restore one pre-response checkpoint without ct dri
         assert.deepEqual(store.load().history, initial.history);
         assert.deepEqual(store.load().dedupe, initial.dedupe);
         assert.equal(store.load().meta.createdAt, 123);
+    } finally { resetRuntime(); }
+});
+
+test('background swipe generation restores its checkpoint without selecting the pending swipe', async () => {
+    const { context, store, initial } = setup();
+    try {
+        const firstState = stateAt(1, 'selected branch');
+        const raw = reply(firstState, initial.head, 'turn-1');
+        context.chat.push({ is_user: false, mes: raw, extra: {}, swipe_id: 0, swipes: [raw], swipe_info: [{ send_date: 'first', extra: {} }] });
+        await handleMessageReceived({ messageId: 1 });
+        assert.equal(store.load().ct, 1);
+
+        const prepared = await prepareSwipeGenerationBaseline({ expectedChatId: 'chat' });
+        assert.equal(prepared.status, 'swipe_generation_baseline');
+        assert.equal(prepared.verified, true);
+        assert.equal(store.load().ct, 0);
+
+        const injected = await stStateGenerateInterceptor(context.chat, 8192, () => {}, 'swipe');
+        assert.equal(injected.injected, true);
+        assert.equal(store.load().ct, 0);
+
+        const resumed = await stStateGenerateInterceptor(context.chat, 8192, () => {}, 'normal');
+        assert.equal(resumed.injected, true);
+        assert.equal(store.load().ct, 1);
+        assert.equal(store.load().scene.openBeat, 'selected branch');
+    } finally { resetRuntime(); }
+});
+
+test('an unreconstructable Shadow swipe is cancelled instead of falling through to legacy generation', async () => {
+    const { context } = setup();
+    try {
+        const orphan = stateAt(1, 'orphan branch');
+        const raw = exportLegacyState(orphan);
+        context.chat.push({ is_user: false, mes: raw, extra: {}, swipe_id: 0, swipes: [raw], swipe_info: [{ extra: {} }] });
+        let aborted = false;
+        const result = await stStateGenerateInterceptor(context.chat, 8192, (immediately) => { aborted = immediately; }, 'swipe');
+        assert.equal(result.injected, false);
+        assert.equal(result.reason, 'branch_checkpoint_required');
+        assert.equal(aborted, true);
+    } finally { resetRuntime(); }
+});
+
+test('selecting an older untracked branch reconstructs its checkpoint from chat history', async () => {
+    const { context, store, initial } = setup();
+    try {
+        const priorRaw = exportLegacyState(initial);
+        const selectedState = stateAt(1, 'older selected branch');
+        const selectedRaw = reply(selectedState, initial.head, 'older-branch');
+        context.chat.push({ is_user: false, mes: priorRaw, extra: {} });
+        context.chat.push({ is_user: false, mes: selectedRaw, extra: {}, swipe_id: 0, swipes: [selectedRaw], swipe_info: [{ send_date: 'older', extra: {} }] });
+
+        const selected = await handleMessageSwiped(2);
+        assert.equal(selected.status, 'branch_selected');
+        assert.equal(store.load().ct, 1);
+        assert.equal(store.load().scene.openBeat, 'older selected branch');
+        assert.equal(store.loadBranchLedger().slots['slot:chat:2'].checkpointCt, 0);
     } finally { resetRuntime(); }
 });
 

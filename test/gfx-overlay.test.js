@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { GfxOverlay, calculateGfxDuration, createGfxOverlay } from '../src/gfx-overlay.js';
+import { GFX_PHONE_LAUNCHER_ID, GfxOverlay, calculateGfxDuration, createGfxOverlay } from '../src/gfx-overlay.js';
 import { GFX_MEDIA_KINDS, parseGfxProtocol } from '../src/gfx.js';
 
 class FakeClassList {
@@ -89,8 +89,27 @@ test('status-only phone metadata is rendered once and never restored below the c
     const frame = card.children[0];
     const status = frame.children.find((node) => node.className.includes('st-gfx-phone-status'));
     const meta = frame.children.find((node) => node.className === 'st-gfx-meta');
-    assert.equal(status.textContent, '09:41LTE 82%');
+    const indicators = status.children[1];
+    assert.equal(indicators.children.some((node) => node.className === 'st-gfx-android-cellular'), true);
+    assert.equal(indicators.children.some((node) => node.className === 'st-gfx-android-network'), true);
+    assert.equal(indicators.children.some((node) => node.className === 'st-gfx-android-battery'), true);
+    assert.match(status.textContent, /09:41.*LTE.*82/);
     assert.equal(meta, undefined);
+});
+
+test('Android status time falls back to the newest message and draws default device indicators', () => {
+    const documentRef = documentFixture();
+    const overlay = new GfxOverlay({ document: documentRef, duration: 0 });
+    const card = overlay.show({ id: 'android-derived-status', kind: 'phone', platform: 'android', title: 'Group', rows: [
+        { role: 'received', label: 'Mira', time: '08:00', text: 'First' },
+        { role: 'received', label: 'Niko', time: '08:01', text: 'Latest' },
+    ] });
+    const status = card.children[0].children.find((node) => node.className.includes('st-gfx-phone-status'));
+    const indicators = status.children[1];
+    assert.equal(status.children[0].textContent, '08:01');
+    assert.equal(indicators.children.some((node) => node.className === 'st-gfx-android-cellular'), true);
+    assert.equal(indicators.children.some((node) => node.className === 'st-gfx-android-wifi'), true);
+    assert.equal(indicators.children.some((node) => node.className === 'st-gfx-android-battery'), true);
 });
 
 test('iOS status bar owns cellular, wifi, and battery geometry', () => {
@@ -127,6 +146,41 @@ test('deduplicates IDs, bounds visible cards, and replaces branches', () => {
     assert.equal(overlay.branchId, 'b');
     assert.equal(overlay.cards.size, 1);
     assert.equal(overlay.cards.get('new').classList.contains('st-gfx-phone-android'), true);
+});
+
+test('persistent phone launcher toggles and reopens the latest phone event', () => {
+    const documentRef = documentFixture();
+    const overlay = new GfxOverlay({ document: documentRef, duration: 0 });
+    const launcher = documentRef.querySelector(`#${GFX_PHONE_LAUNCHER_ID}`);
+    assert.ok(launcher);
+    assert.equal(launcher.attributes['aria-label'], 'Open phone');
+
+    overlay.show({ id: 'latest-phone', kind: 'phone', platform: 'android', title: 'Messages', rows: [{ role: 'received', text: 'Still here.' }] });
+    assert.equal(launcher.attributes['aria-pressed'], 'true');
+    assert.equal(overlay.togglePhone(), null);
+    assert.equal(overlay.cards.size, 0);
+    assert.equal(launcher.attributes['aria-pressed'], 'false');
+
+    const reopened = overlay.togglePhone();
+    assert.ok(reopened);
+    assert.equal(reopened.classList.contains('st-gfx-phone-android'), true);
+    assert.match(reopened.textContent, /Still here\./);
+    assert.equal(launcher.attributes['aria-pressed'], 'true');
+});
+
+test('phone launcher uses the selected-chat provider and falls back to an empty shell', () => {
+    const documentRef = documentFixture();
+    const overlay = new GfxOverlay({
+        document: documentRef,
+        duration: 0,
+        phoneEventProvider: () => ({ kind: 'phone', platform: 'ios', title: 'Recovered phone', rows: ['Cached message'] }),
+    });
+    const recovered = overlay.togglePhone();
+    assert.match(recovered.textContent, /Recovered phone.*Cached message/);
+    overlay.clear();
+    overlay.phoneEventProvider = null;
+    const empty = overlay.togglePhone();
+    assert.match(empty.textContent, /Phone.*No recent phone activity/);
 });
 
 test('disabled and non-public events never render; branch identity can auto-clear', () => {

@@ -17,4 +17,5 @@ export * from './shadow.js';
 export * from './branch.js';
 export * from './gfx.js';
 export * from './gfx-overlay.js';
+export * from './local-frame.js';
 

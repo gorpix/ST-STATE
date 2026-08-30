@@ -71,6 +71,23 @@ function compactActor(actor, id, scene, spotlightIds) {
     const displayName = cleanText(actor.displayName, 200);
     if (displayName && displayName !== name) frame.displayName = displayName;
 
+    // User autonomy: the local frame exposes only established placement,
+    // enacted activity, body facts, and affiliations for the PC. NPC-only
+    // cognition and agenda fields remain absent even after a legacy import.
+    if (id === 'US') {
+        const position = firstMeaningfulText([scene.positions?.[id], actor.position, actor.location, actor.at], 500);
+        if (isMeaningful(position)) frame.position = position;
+        const userState = {};
+        const activity = firstMeaningfulText([actor.activity, actor.doing], 1000);
+        if (isMeaningful(activity)) userState.activity = activity;
+        for (const field of ['circle', 'body']) {
+            const value = cleanTextOrList(actor[field], 1000);
+            if (isMeaningful(value)) userState[field] = value;
+        }
+        if (Object.keys(userState).length) frame.state = userState;
+        return frame;
+    }
+
     // Scene positions are the authoritative local placement. Actor-level
     // position/location/at aliases are folded into the same single field.
     const position = firstMeaningfulText([scene.positions?.[id], actor.position, actor.location, actor.at], 500);
@@ -167,7 +184,7 @@ export function projectUnifiedLocalFrame(input, options = {}) {
             const frame = actorFrames.get(id);
             if (!frame.thoughts) frame.thoughts = [];
             frame.thoughts.push(thought.thoughts);
-        } else if (Object.keys(thought).length) unassignedThoughts.push(thought);
+        } else if (options.includeUnassigned !== false && Object.keys(thought).length) unassignedThoughts.push(thought);
     }
     for (const raw of state.residue) {
         const residue = compactResidue(raw);
@@ -177,7 +194,7 @@ export function projectUnifiedLocalFrame(input, options = {}) {
             if (!frame.residue) frame.residue = [];
             const { subject: _subject, ...attached } = residue;
             if (Object.keys(attached).length) frame.residue.push(attached);
-        } else if (Object.keys(residue).length) unassignedResidue.push(residue);
+        } else if (options.includeUnassigned !== false && Object.keys(residue).length) unassignedResidue.push(residue);
     }
 
     const relations = Object.entries(state.relations.pairs ?? {})

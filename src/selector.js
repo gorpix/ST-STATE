@@ -1,6 +1,7 @@
 import { isValidActorId } from './identity.js';
 import { sanitizePlainText } from './util.js';
 import { shadowHandshake } from './shadow.js';
+import { formatUnifiedLocalFrame, projectUnifiedLocalFrame } from './local-frame.js';
 
 function escapeRegex(value) {
     return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -142,6 +143,10 @@ export function buildProtocolPrompt(state, options = {}) {
     const selection = selectHotState(state, options);
     const mode = String(options.mode ?? 'SHADOW').trim().toUpperCase();
     if (mode !== 'SHADOW') return { text: shadowHandshake(state, { mode }), selection, mode };
+    const localFrame = projectUnifiedLocalFrame(state, {
+        selectedActorIds: selection.selectedActorIds,
+        includeUnassigned: false,
+    });
     const protocol = [
         shadowHandshake(state, { mode }),
         'ST-STATE SHADOW TRANSACTION PROTOCOL v1',
@@ -151,13 +156,13 @@ export function buildProtocolPrompt(state, options = {}) {
         'NORMAL is the only state-bearing route. OOC and FLASH emit prose or handoff only: no legacy block and no ST_PATCH. If <flash_handoff .../> is present, FLASH wins.',
         'Allowed data lines only: actor.set|ID|field|value ; actor.create|ID|field|value ; scene.set|field|value ; scene.position|ID|value ; relation.set|A|B|bond|value ; relation.set|A|B|sparks|value ; relation.set|A|B|grudge|value. The value is the entire remainder of its one line and needs no quoting or escaping. Emit only fields changed this turn; never restate whole records.',
         'For every emitted data line, copy the value character-for-character from the corresponding field in the complete <internal_states> block you just wrote; never summarize or paraphrase it. The only exception is VAD, which must be numerically clamped to the patch range below.',
-        'Patch VAD contract: valence, arousal, and dominance must each be finite numbers clamped to -2..2, even if legacy prose/state used a wider value. Copy actor IDs exactly from ST_STATE_PACK; never derive, rename, or replace them.',
+        'Patch VAD contract: valence, arousal, and dominance must each be finite numbers clamped to -2..2, even if legacy prose/state used a wider value. Copy actor IDs exactly from ST_LOCAL_FRAME; never derive, rename, or replace them.',
         'Relationship ranges: bond is an integer from -5..20; sparks and grudge are integers from 0..100. Copy both actor IDs and values from the matching RELATION row. Do not emit arbitrary paths, unknown fields, profiles, or other mechanics reducers. Always emit both the required internal-state HTML block and ST_PATCH for NORMAL.',
         'Ordinary RP always uses NORMAL, even with no data lines; ct still advances. Use OOC only for an out-of-character answer and FLASH only when the router chooses FLASH. Never invent values. Put ST_PATCH outside and after <!-- GFX_END -->.',
         `<!--ST_PATCH\nV2\nbase=${selection.meta.head}\nmode=NORMAL\ntx=turn-${selection.meta.ct + 1}\n-->`,
-        formatHotStatePack(selection),
+        formatUnifiedLocalFrame(localFrame),
     ];
-    return { text: protocol.join('\n'), selection, mode };
+    return { text: protocol.join('\n'), selection, localFrame, mode };
 }
 
 export const buildHotStatePack = (state, options = {}) => formatHotStatePack(selectHotState(state, options));

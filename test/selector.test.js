@@ -34,7 +34,7 @@ test('protocol keeps an ordinary zero-delta RP turn NORMAL', () => {
     assert.match(prompt, /Ordinary RP always uses NORMAL, even with no data lines/);
     assert.match(prompt, /Use OOC only for an out-of-character answer/);
     assert.match(prompt, /valence, arousal, and dominance must each be finite numbers clamped to -2\.\.2/);
-    assert.match(prompt, /Copy actor IDs exactly from ST_STATE_PACK/);
+    assert.match(prompt, /Copy actor IDs exactly from ST_LOCAL_FRAME/);
     assert.match(prompt, /Patch transport is line-based, never JSON/);
     assert.match(prompt, /actor\.set\|ID\|field\|value/);
     assert.match(prompt, /copy the value character-for-character/);

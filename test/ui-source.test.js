@@ -66,6 +66,37 @@ test('phone skins retain a fixed device ratio with a scrolling content viewport'
     assert.match(source, /width:\s*min\(18rem, 100%, calc\(46\.1538dvh - 2\.54rem\)\)/);
 });
 
+test('local GFX exposes a persistent accessible phone launcher', async () => {
+    const overlaySource = await readFile(new URL('../src/gfx-overlay.js', import.meta.url), 'utf8');
+    const cssSource = await readFile(new URL('../style.css', import.meta.url), 'utf8');
+    assert.match(overlaySource, /GFX_PHONE_LAUNCHER_ID/);
+    assert.match(overlaySource, /aria-pressed/);
+    assert.match(overlaySource, /togglePhone\(\)/);
+    assert.match(cssSource, /\.st-gfx-phone-launcher/);
+});
+
+test('runtime refresh synchronizes mode selectors after chat metadata changes', async () => {
+    const source = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
+    assert.match(source, /querySelector\?\.\('\[aria-label="ST-STATE chat mode"\]'\)/);
+    assert.match(source, /mode\.value = runtimeState\.engine\?\.getMode\?\.\(\)/);
+    assert.match(source, /defaultMode\.value = getGlobalDefaultMode/);
+});
+
+test('Android phone skin has geometric status icons and high-contrast message surfaces', async () => {
+    const source = await readFile(new URL('../style.css', import.meta.url), 'utf8');
+    for (const selector of ['st-gfx-android-cellular', 'st-gfx-android-wifi', 'st-gfx-android-battery']) assert.match(source, new RegExp(`\\.${selector}`));
+    assert.match(source, /\.st-gfx-phone-android \.st-gfx-row-role-received[^}]*background:\s*#27323b[^}]*color:\s*#f5f7f9/s);
+    assert.match(source, /\.st-gfx-phone-android \.st-gfx-row-role-sent[^}]*background:\s*#0b57d0[^}]*color:\s*#fff/s);
+});
+
+test('iPhone skin uses high-contrast dark Messages surfaces', async () => {
+    const source = await readFile(new URL('../style.css', import.meta.url), 'utf8');
+    assert.match(source, /\.st-gfx-phone-status-ios[^}]*background:\s*#000[^}]*color:\s*#f5f5f7/s);
+    assert.match(source, /\.st-gfx-phone-ios \.st-gfx-row-role-received[^}]*background:\s*#2c2c2e[^}]*color:\s*#fff/s);
+    assert.match(source, /\.st-gfx-phone-ios \.st-gfx-row-role-sent[^}]*background:\s*#0a84ff[^}]*color:\s*#fff/s);
+    assert.match(source, /\.st-gfx-phone-shell\.st-gfx-phone-ios::after/);
+});
+
 test('the local stylesheet has a distinct shell for every non-phone media kind', async () => {
     const source = await readFile(new URL('../style.css', import.meta.url), 'utf8');
     for (const kind of ['terminal', 'paper', 'map', 'notice', 'credential', 'transaction', 'web', 'broadcast', 'data', 'image', 'monitor', 'media']) {

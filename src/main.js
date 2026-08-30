@@ -8,7 +8,7 @@ import { extractHiddenPatch, messageText, removeControlPayload, stripMessageCont
 import { CHAT_CONFIG_KEY, DEFAULT_ENGINE_MODE, ENGINE_MODES, SETTINGS_KEY, ensureGlobalSettings, getChatMode, getGlobalDefaultMode, normalizeEngineMode, setChatMode, setGlobalDefaultMode } from './modes.js';
 import { deepClone, stableHash } from './util.js';
 import { importLegacyState } from './legacy.js';
-import { BRANCH_SIDECAR_KEY, checkpointAssistantSlot, createBranchLedger, invalidateAssistantDelete, invalidateAssistantEdit, latestAssistantCheckpoint, prepareSwipeEvaluation, registerAssistantSwipe, stableSwipeIdentity } from './branch.js';
+import { BRANCH_SIDECAR_KEY, checkpointAssistantSlot, createBranchLedger, invalidateAssistantDelete, invalidateAssistantEdit, latestAssistantCheckpoint, prepareSwipeEvaluation, registerAssistantSwipe, restoreAssistantCheckpoint, stableSwipeIdentity } from './branch.js';
 import { EXTENSION_KEY } from './schema.js';
 import { SHADOW_SIDECAR_KEY } from './modes.js';
 import { extractGfxProtocol, GFX_MEDIA_KINDS, removeGfxControl } from './gfx.js';
@@ -100,7 +100,28 @@ function gfxOptions(adapter = runtimeState.adapter) {
         duration: Number.isFinite(duration) ? Math.max(2000, Math.min(20000, Math.trunc(duration))) : 7000,
         maxVisible: 1,
         reducedMotion: Boolean(globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches),
+        phoneEventProvider: () => latestCachedPhoneEvent(adapter),
     };
+}
+
+function latestCachedPhoneEvent(adapter = runtimeState.adapter) {
+    const chat = adapter?.getChat?.() ?? [];
+    const chatId = String(adapter?.getChatId?.() ?? '');
+    for (let index = chat.length - 1; index >= 0; index -= 1) {
+        const message = chat[index];
+        if (!isAssistantSlot(message)) continue;
+        const options = branchOptions(adapter, message, index);
+        const cached = gfxCache(message)?.[options.swipeIdentity];
+        const target = selectedSwipeTarget(message, options.swipeIndex);
+        const parsed = target.pending ? null : extractGfxProtocol(target.text).events?.[0];
+        const event = cached?.kind === 'phone' ? cached : (parsed?.kind === 'phone' ? parsed : null);
+        if (!event) continue;
+        return {
+            ...deepClone(event),
+            branchId: `${chatId}:${options.slotId}:${options.swipeIdentity}`,
+        };
+    }
+    return null;
 }
 
 function ensureGfxOverlay() {
@@ -297,6 +318,10 @@ function requireCurrentShadowBaseline(adapter, loadState, action) {
 function refreshUI() {
     if (!runtimeState.ui || !runtimeState.store) return;
     try {
+        const mode = runtimeState.ui.settingsRoot?.querySelector?.('[aria-label="ST-STATE chat mode"]');
+        const defaultMode = runtimeState.ui.settingsRoot?.querySelector?.('[aria-label="ST-STATE global default mode"]');
+        if (mode) mode.value = runtimeState.engine?.getMode?.() ?? DEFAULT_ENGINE_MODE;
+        if (defaultMode) defaultMode.value = getGlobalDefaultMode(runtimeState.adapter?.getSettings?.());
         renderReadOnlyDashboard(runtimeState.ui.dashboard, runtimeState.store.load());
         renderDiagnosticEvents(runtimeState.ui.diagnosticEvents, runtimeState.engine?.diagnostics?.list?.() ?? []);
         renderShadowParity(runtimeState.ui.parity, runtimeState.store.getShadowReport?.());
@@ -366,6 +391,20 @@ function recoverOldCheckpoint(store) {
     try { return store.parseBackup(backup).state; } catch { return null; }
 }
 
+function inferBranchCheckpoint(adapter, index, baseState) {
+    const prefix = (adapter?.getChat?.() ?? []).slice(0, index).map((message) => messageText(message)).join('\n');
+    if (!/<internal_states\b/i.test(prefix)) return null;
+    const imported = importLegacyState(prefix, {
+        now: Date.now(),
+        baseState,
+        preserveMissingFromBase: true,
+        mergeSparseFromBase: true,
+        requireTurn: true,
+        userName: adapter?.getUserName?.(),
+    });
+    return imported.ok ? preserveCanonicalBookkeeping(imported.state, baseState) : null;
+}
+
 async function cleanBranchControl(message, status, adapter, expectedChatId) {
     if (!sameChat(adapter, expectedChatId)) return false;
     const extracted = extractHiddenPatch(messageText(message));
@@ -417,7 +456,7 @@ export async function handleMessageSwiped(data) {
     let ledger = store.loadBranchLedger?.({ initialize: false });
     let selected = prepareSwipeEvaluation(ledger, options);
     if (!selected.ok) {
-        const fallback = recoverOldCheckpoint(store);
+        const fallback = inferBranchCheckpoint(adapter, index, store.load()) ?? recoverOldCheckpoint(store);
         if (!fallback) {
             engine.diagnostics?.warn?.('BRANCH_BASELINE', 'No pre-response checkpoint exists for this swipe. Use Rebaseline selected branch.');
             adapter.notify?.('warning', 'ST-STATE needs Rebaseline selected branch for this older swipe.');
@@ -426,6 +465,7 @@ export async function handleMessageSwiped(data) {
         const checkpoint = checkpointAssistantSlot(ledger, { ...options, state: fallback });
         ledger = checkpoint.ledger;
         selected = prepareSwipeEvaluation(ledger, options);
+        engine.diagnostics?.info?.('BRANCH_AUTO_REBASELINE', `Rebuilt the selected branch checkpoint at ct ${fallback.ct}.`);
     }
     const checkpointState = selected.restoreState;
     const imported = options.pendingSwipe ? { ok: false, diagnostics: ['Pending overswipe'] } : importLegacyState(options.selectedText, {
@@ -623,7 +663,7 @@ function mountUI() {
     ensureGfxOverlay();
 }
 
-export async function rebaselineSelectedBranch({ expectedChatId = undefined } = {}) {
+export async function rebaselineSelectedBranch({ expectedChatId = undefined, preserveBranchLedger = false, automatic = false } = {}) {
     const adapter = runtimeState.adapter;
     const store = runtimeState.store;
     if (!adapter || !store) throw new Error('ST-STATE runtime is unavailable');
@@ -633,13 +673,46 @@ export async function rebaselineSelectedBranch({ expectedChatId = undefined } = 
     const imported = importLegacyState(chatText, { now: Date.now(), baseState: previous, preserveMissingFromBase: true, mergeSparseFromBase: true, requireTurn: true, userName: adapter.getUserName?.() });
     if (!imported.ok) throw new Error(imported.diagnostics?.join('; ') || 'No usable <internal_states> block was found on the selected branch');
     const canonical = preserveCanonicalBookkeeping(imported.state, previous);
-    const ledger = createBranchLedger();
-    const report = branchReport('manual_branch_rebaseline', canonical, { source: 'selected-branch-legacy', legacy: { status: 'baseline', ct: canonical.ct } });
+    const ledger = preserveBranchLedger ? store.loadBranchLedger?.({ initialize: false }) ?? createBranchLedger() : createBranchLedger();
+    const report = branchReport(automatic ? 'automatic_branch_rebaseline' : 'manual_branch_rebaseline', canonical, { source: 'selected-branch-legacy', legacy: { status: 'baseline', ct: canonical.ct } });
+    report.recoveryBackup = store.recoveryBackup?.({ state: previous }) ?? null;
     await store.saveBranchCommit(canonical, ledger, report, { expectedChatId: chatId });
     runtimeState.gfxOverlay?.clear?.();
     runtimeState.chatTopology = snapshotChatTopology(adapter);
     const partial = imported.complete ? '' : ` Preserved ${imported.missingSections.length} missing sections.`;
+    if (automatic) runtimeState.engine?.diagnostics?.info?.('BRANCH_AUTO_REBASELINE', `Selected branch automatically rebaselined at ct ${canonical.ct}.`);
     return { importedDigest: imported.digest ?? canonical.head, message: `Selected branch rebaselined at ct ${canonical.ct}.${partial}` };
+}
+
+/** Restore the latest assistant slot's pre-response checkpoint before a swipe is generated. */
+export async function prepareSwipeGenerationBaseline({ expectedChatId = undefined } = {}) {
+    const adapter = runtimeState.adapter;
+    const store = runtimeState.store;
+    const engine = runtimeState.engine;
+    if (!adapter || !store || !engine || engine.getMode?.() !== 'SHADOW') return { status: 'ignored', verified: false };
+    const chat = adapter.getChat?.() ?? [];
+    let index = chat.length - 1;
+    while (index >= 0 && !isAssistantSlot(chat[index])) index -= 1;
+    if (index < 0) return { status: 'missing_slot', verified: false };
+    const chatId = String(expectedChatId ?? adapter.getChatId?.() ?? '');
+    const options = branchOptions(adapter, chat[index], index);
+    let ledger = store.loadBranchLedger?.({ initialize: false }) ?? createBranchLedger();
+    let restored = restoreAssistantCheckpoint(ledger, options);
+    if (!restored.ok) {
+        const inferred = inferBranchCheckpoint(adapter, index, store.load());
+        if (!inferred) return { status: 'missing_checkpoint', verified: false };
+        const checkpoint = checkpointAssistantSlot(ledger, { ...options, state: inferred });
+        ledger = checkpoint.ledger;
+        restored = restoreAssistantCheckpoint(ledger, options);
+    }
+    const previous = store.load();
+    const report = branchReport('swipe_generation_baseline', restored.restoreState, { ...options, source: 'branch-checkpoint', previous });
+    report.recoveryBackup = store.recoveryBackup?.({ state: previous }) ?? null;
+    const persisted = await persistBranchCommit(restored.restoreState, restored.ledger, report, { adapter, store, engine, expectedChatId: chatId });
+    if (!persisted) return { status: 'persistence_error', verified: false };
+    engine.diagnostics?.info?.('SWIPE_BASELINE_READY', `Swipe generation restored the shared checkpoint at ct ${restored.restoreState.ct}.`);
+    refreshUI();
+    return { status: 'swipe_generation_baseline', verified: true, state: restored.restoreState, index };
 }
 
 export async function clearCurrentChatState({ expectedChatId = undefined } = {}) {
@@ -796,22 +869,42 @@ export function previewLocalGfx(kind = 'paper', options = {}) {
     const overlay = ensureGfxOverlay();
     if (!overlay) return null;
     const fixture = GFX_PREVIEW_FIXTURES[selected] ?? GFX_PREVIEW_FIXTURES.paper;
+    const phonePlatform = String(options.platform ?? 'ios').toLowerCase() === 'android' ? 'android' : 'ios';
+    const phoneFixture = phonePlatform === 'android' ? {
+        platform: 'android',
+        layout: options.layout ?? 'chat',
+        title: 'Weekend plans (5)',
+        source: undefined,
+        meta: { time: '09:41', battery: 'LTE 82%' },
+        rows: [
+            { role: 'received', label: 'Niko', time: '09:38', text: 'Platform confirmed. Meet by the west entrance.' },
+            { role: 'received', label: 'Mara', time: '09:39', text: 'I have the tickets and the route.' },
+            { role: 'received', label: 'Ari', time: '09:40', text: 'Running five minutes late.' },
+            { role: 'sent', label: 'You', time: '09:40', text: 'No problem. Keep the group posted.' },
+            { role: 'received', label: 'Niko', time: '09:41', text: 'Copy that.' },
+            { role: 'system', time: '09:41', text: 'Mara changed the group description.' },
+        ],
+    } : {
+        platform: 'ios',
+        layout: options.layout ?? 'chat',
+        title: 'Weekend plans (5)',
+        source: undefined,
+        meta: { time: '09:41', battery: 'Wi-Fi 87%' },
+        rows: [
+            { role: 'received', label: 'Niko', time: '09:38', text: 'Platform confirmed. Meet by the west entrance.' },
+            { role: 'received', label: 'Mara', time: '09:39', text: 'I have the tickets and the route.' },
+            { role: 'received', label: 'Ari', time: '09:40', text: 'Running five minutes late.' },
+            { role: 'sent', label: 'You', time: '09:40', text: 'No problem. Keep the group posted.' },
+            { role: 'received', label: 'Niko', time: '09:41', text: 'Copy that.' },
+            { role: 'system', time: '09:41', text: 'Mara changed the group description.' },
+        ],
+    };
     const event = {
         ...deepClone(fixture),
         id: `preview-${selected}-${Date.now()}`,
         kind: selected,
         visibility: 'public',
-        ...(selected === 'phone' ? {
-            platform: String(options.platform ?? 'ios').toLowerCase() === 'android' ? 'android' : 'ios',
-            layout: options.layout ?? 'chat',
-            title: String(options.platform ?? 'ios').toLowerCase() === 'android' ? 'Chat' : 'Messages',
-            source: String(options.platform ?? 'ios').toLowerCase() === 'android' ? 'Niko' : 'Mara',
-            meta: { time: '09:41', battery: String(options.platform ?? 'ios').toLowerCase() === 'android' ? 'LTE 82%' : 'Wi-Fi 87%' },
-            rows: [
-                { role: 'received', label: String(options.platform ?? 'ios').toLowerCase() === 'android' ? 'Niko' : 'Mara', time: '09:40', text: 'You seeing this?' },
-                { role: 'sent', label: 'You', time: '09:41', text: 'Yeah. Keep the line open.' },
-            ],
-        } : {}),
+        ...(selected === 'phone' ? phoneFixture : {}),
     };
     overlay.replaceBranch?.(`preview:${selected}:${Date.now()}`, [event]);
     return event;
@@ -821,13 +914,47 @@ export function previewLocalPhoneGfx(platform = 'ios') {
     return previewLocalGfx('phone', { platform });
 }
 
-export async function stStateGenerateInterceptor(chat, _contextSize, _abort, type = 'normal') {
+export async function stStateGenerateInterceptor(chat, _contextSize, abort, type = 'normal') {
     if (!runtimeState.engine) initialize();
     if (!runtimeState.engine || !runtimeState.active) return;
     runtimeState.adapter?.noteGenerationType?.(type);
     const chatArray = Array.isArray(chat) ? chat : [];
     const latestUser = [...chatArray].reverse().find((message) => message?.is_user === true || message?.role === 'user');
-    return runtimeState.engine.injectPrompt(type, { userText: latestUser ? messageText(latestUser) : runtimeState.engine.latestUserText() });
+    const generationType = String(type ?? 'normal').trim().toLowerCase();
+    let verifiedBranchBaseline = false;
+    if (runtimeState.engine.getMode?.() === 'SHADOW') {
+        try {
+            if (generationType === 'swipe') {
+                const prepared = await prepareSwipeGenerationBaseline({ expectedChatId: runtimeState.adapter?.getChatId?.() });
+                verifiedBranchBaseline = prepared.verified === true;
+                if (!verifiedBranchBaseline) {
+                    const message = 'Shadow swipe generation needs a reconstructable pre-response branch checkpoint.';
+                    runtimeState.adapter?.clearPrompt?.();
+                    runtimeState.engine.diagnostics?.warn?.('SWIPE_BASELINE_REQUIRED', message, prepared);
+                    runtimeState.adapter?.notify?.('warning', `ST-STATE cancelled generation: ${message}`);
+                    abort?.(true);
+                    return { injected: false, skipped: true, type: generationType, mode: 'SHADOW', reason: 'branch_checkpoint_required', branch: prepared };
+                }
+            } else {
+                const baseline = inspectShadowBaseline(runtimeState.adapter, runtimeState.store?.load?.({ initialize: false }));
+                if (baseline.status === 'stale') {
+                    await rebaselineSelectedBranch({ expectedChatId: runtimeState.adapter?.getChatId?.(), preserveBranchLedger: true, automatic: true });
+                }
+            }
+        } catch (error) {
+            runtimeState.adapter?.clearPrompt?.();
+            runtimeState.engine.diagnostics?.warn?.('AUTO_REBASELINE_FAILED', `Automatic branch rebaseline failed: ${error.message}`);
+            runtimeState.adapter?.notify?.('warning', `ST-STATE cancelled generation: ${error.message}`);
+            abort?.(true);
+            return { injected: false, skipped: true, type: generationType, mode: 'SHADOW', reason: 'automatic_rebaseline_failed', error };
+        }
+    }
+    const result = await runtimeState.engine.injectPrompt(type, {
+        userText: latestUser ? messageText(latestUser) : runtimeState.engine.latestUserText(),
+        verifiedBranchBaseline,
+    });
+    if (result?.mode === 'SHADOW' && ['baseline_required', 'baseline_stale'].includes(result?.reason)) abort?.(true);
+    return result;
 }
 
 export function getRuntime() {

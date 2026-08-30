@@ -42,7 +42,7 @@ test('legacy mode does not process controls, while shadow prompt includes handsh
     const injected = await engine.injectPrompt('normal', { userText: 'Alice' });
     assert.equal(injected.injected, true);
     assert.match(context.injection[1], /ST_STATE_HANDSHAKE v1/);
-    assert.match(context.injection[1], /ST_STATE_PACK/);
+    assert.match(context.injection[1], /ST_LOCAL_FRAME/);
     assert.equal(context.injection[0], 'stState.hotState');
     assert.equal(context.injection[2], 1);
 });

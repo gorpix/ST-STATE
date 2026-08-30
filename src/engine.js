@@ -146,7 +146,9 @@ export class STStateEngine {
             return { injected: false, skipped: true, type: generationType, mode, reason };
         }
         const state = this.loadState({ initialize: false });
-        const baseline = inspectShadowBaseline(this.adapter, state, { now: this.now() });
+        const baseline = options.verifiedBranchBaseline === true
+            ? { status: 'verified_branch', ready: true }
+            : inspectShadowBaseline(this.adapter, state, { now: this.now() });
         if (baseline.status === 'missing' || baseline.status === 'incomplete') {
             this.adapter.clearPrompt();
             this.diagnostics.warn('BASELINE_REQUIRED', 'Import the latest usable legacy state before Shadow prompt injection.');

@@ -3,6 +3,7 @@ import { stateSummary } from './schema.js';
 import { deepClone, sanitizePlainText } from './util.js';
 import { ENGINE_MODES, SELECTABLE_MODES, NATIVE_MODE_LOCKED } from './modes.js';
 import { GFX_MEDIA_KINDS } from './gfx.js';
+import { projectUnifiedLocalFrame } from './local-frame.js';
 
 function element(tag, className = '', text = undefined) {
     const node = document.createElement(tag);
@@ -53,6 +54,41 @@ function actorCard(actor, id) {
     heading.append(element('code', 'st-actor-id', id));
     card.append(heading);
     for (const [label, value] of [['At', actor?.at ?? actor?.location ?? actor?.position], ['Doing', actor?.doing ?? actor?.activity], ['Agenda', actor?.agenda], ['VAD', [actor?.valence, actor?.arousal, actor?.dominance].every((item) => typeof item === 'number') ? `${actor.valence}/${actor.arousal}/${actor.dominance}` : undefined], ['Focus', actor?.focus], ['Aware', actor?.aware], ['Fibs', actor?.fibs], ['Circle', actor?.circle], ['Body', actor?.body]]) appendLabelValue(card, label, stringValue(value));
+    return card;
+}
+
+function unifiedActorCard(actor) {
+    const state = actor?.state ?? {};
+    if (actor?.id === 'US') {
+        const card = element('article', 'st-actor-card st-user-card');
+        const heading = element('h4', '', `${actor?.displayName || actor?.name || '{{user}}'} `);
+        heading.append(element('code', 'st-actor-id', 'US'));
+        card.append(heading);
+        appendLabelValue(card, 'At', actor?.position);
+        appendLabelValue(card, 'Doing', state.activity);
+        appendLabelValue(card, 'Circle', stringValue(state.circle));
+        appendLabelValue(card, 'Body', stringValue(state.body));
+        return card;
+    }
+    const card = actorCard({
+        ...state,
+        name: actor?.displayName || actor?.name || actor?.id,
+        at: actor?.position,
+        doing: state.activity,
+        valence: state.vad?.v,
+        arousal: state.vad?.a,
+        dominance: state.vad?.d,
+    }, actor?.id);
+    appendLabelValue(card, 'Thoughts', stringValue(actor?.thoughts));
+    const residue = (actor?.residue ?? []).map((item) => [item.event, item.meaning, item.aftereffect, item.cue].filter(Boolean).join(' -> '));
+    appendLabelValue(card, 'Residue', stringValue(residue));
+    return card;
+}
+
+function unifiedEnvironmentCard(frame) {
+    const card = element('article', 'st-actor-card st-environment-card');
+    card.append(element('h4', '', 'Environment'));
+    appendLabelValue(card, 'Environment', frame?.world?.environment);
     return card;
 }
 
@@ -120,18 +156,18 @@ export function renderReadOnlyDashboard(container, inputState, { openSections = 
     appendLabelValue(digest, 'Schema', summary.schemaVersion);
     container.append(header, digest);
 
+    const localFrame = projectUnifiedLocalFrame(state);
     const actorGrid = element('div', 'st-card-grid');
-    for (const [id, actor] of Object.entries(state.actors ?? {})) actorGrid.append(actorCard(actor, id));
-    container.append(section('👥 Actors', actorGrid, { open: openSections.includes('actors') }));
-
-    const scene = element('div', 'st-content');
-    appendLabelValue(scene, 'Spotlight', stringValue(state.scene?.spotlight));
-    appendLabelValue(scene, 'Open beat', state.scene?.openBeat);
-    appendLabelValue(scene, 'Time pressure', state.scene?.timePressure);
-    appendLabelValue(scene, 'Environment', state.scene?.environment);
-    appendLabelValue(scene, 'Positions', stringValue(state.scene?.positions));
-    appendLabelValue(scene, 'Time', state.scene?.time);
-    container.append(section('🌌 Scene & world', scene, { open: true }));
+    actorGrid.append(unifiedEnvironmentCard(localFrame));
+    for (const actor of localFrame.actors ?? []) actorGrid.append(unifiedActorCard(actor));
+    if (localFrame.unassignedThoughts?.length || localFrame.unassignedResidue?.length) {
+        const detached = element('article', 'st-actor-card');
+        detached.append(element('h4', '', 'Unassigned scene memory'));
+        appendLabelValue(detached, 'Thoughts', stringValue(localFrame.unassignedThoughts));
+        appendLabelValue(detached, 'Residue', stringValue(localFrame.unassignedResidue));
+        actorGrid.append(detached);
+    }
+    container.append(section('👥 Actors & scene', actorGrid, { open: true }));
 
     const relationGrid = element('div', 'st-card-grid st-relation-grid');
     for (const relation of Object.values(state.relations?.pairs ?? {})) relationGrid.append(relationCard(relation, state));
@@ -144,7 +180,6 @@ export function renderReadOnlyDashboard(container, inputState, { openSections = 
         factionGrid.append(card);
     }
     container.append(section('🏳️ Factions', factionGrid));
-    const residue = listContent(state.residue); container.append(section('🧩 Emotional residue', residue));
     const quests = listContent(state.quests); container.append(section('📜 Quests', quests));
     const inventory = element('div', 'st-content');
     for (const [label, value] of [['Inventory', state.inventory?.items], ['Titles / skills', state.inventory?.titlesSkills], ['Status', state.inventory?.status], ['Modifiers', state.inventory?.modifiers]]) appendLabelValue(inventory, label, stringValue(value));
@@ -152,7 +187,6 @@ export function renderReadOnlyDashboard(container, inputState, { openSections = 
     const chekhov = element('div', 'st-content');
     for (const [label, value] of [['Active', state.chekhov?.active], ['Locked', state.chekhov?.locked], ['Fired', state.chekhov?.fired]]) appendLabelValue(chekhov, label, stringValue(value));
     container.append(section("🔫 Chekhov's gun", chekhov));
-    container.append(section('🧠 Thoughts', listContent(state.thoughts)));
     container.append(section("📓 GM's notebook", listContent(state.notebook)));
     container.append(section('🎲 Last DND check', listContent(state.lastDnd ? [state.lastDnd] : [])));
     container.append(section('🕰️ Clocks', listContent(state.clocks)));

@@ -8,6 +8,7 @@
  */
 
 export const GFX_OVERLAY_ID = 'st-state-gfx-overlay';
+export const GFX_PHONE_LAUNCHER_ID = 'st-state-phone-launcher';
 export const DEFAULT_GFX_OVERLAY_OPTIONS = Object.freeze({
     enabled: true,
     reducedMotion: false,
@@ -66,11 +67,43 @@ function phoneStatusDetails(event) {
     return { raw, battery, network, wifi: /wi[ -]?fi/i.test(raw) || !network };
 }
 
+function phoneStatusTime(event) {
+    const explicit = text(event?.meta?.time ?? event?.time ?? '').trim();
+    if (explicit) return explicit;
+    const rows = rowEntries(event);
+    for (let index = rows.length - 1; index >= 0; index -= 1) {
+        const row = rows[index];
+        if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
+        const value = text(row.time).trim();
+        if (value) return value;
+    }
+    return '';
+}
+
+function appendAndroidStatus(documentRef, indicators, details) {
+    const cellular = appendText(documentRef, indicators, 'span', 'st-gfx-android-cellular');
+    cellular.setAttribute?.('aria-hidden', 'true');
+    for (let index = 1; index <= 4; index += 1) appendText(documentRef, cellular, 'i', `st-gfx-android-cellular-bar st-gfx-android-cellular-bar-${index}`);
+    if (details.network) appendText(documentRef, indicators, 'span', 'st-gfx-android-network', details.network);
+    if (details.wifi) {
+        const wifi = appendText(documentRef, indicators, 'span', 'st-gfx-android-wifi');
+        wifi.setAttribute?.('aria-hidden', 'true');
+    }
+    const battery = appendText(documentRef, indicators, 'span', 'st-gfx-android-battery');
+    battery.setAttribute?.('aria-label', details.battery ? `Battery ${details.battery}%` : 'Battery');
+    appendText(documentRef, battery, 'span', 'st-gfx-android-battery-level');
+    if (details.battery) appendText(documentRef, battery, 'span', 'st-gfx-android-battery-text', details.battery);
+}
+
 function appendPhoneStatus(documentRef, frame, platform, event) {
     const status = appendText(documentRef, frame, 'div', `st-gfx-phone-status st-gfx-phone-status-${platform}`);
-    appendText(documentRef, status, 'span', 'st-gfx-phone-time', event.meta?.time ?? event.time ?? '');
+    appendText(documentRef, status, 'span', 'st-gfx-phone-time', phoneStatusTime(event));
     const details = phoneStatusDetails(event);
     const indicators = appendText(documentRef, status, 'span', 'st-gfx-phone-indicators');
+    if (platform === 'android') {
+        appendAndroidStatus(documentRef, indicators, details);
+        return status;
+    }
     if (platform !== 'ios') {
         indicators.textContent = details.raw;
         return status;
@@ -201,6 +234,37 @@ function resolveRoot(documentRef, requested) {
     return root;
 }
 
+function resolvePhoneLauncher(documentRef) {
+    if (!documentRef || typeof documentRef.createElement !== 'function') return { element: null, created: false };
+    const existing = documentRef.querySelector?.(`#${GFX_PHONE_LAUNCHER_ID}`);
+    if (existing) return { element: existing, created: false };
+    const launcher = documentRef.createElement('button');
+    launcher.id = GFX_PHONE_LAUNCHER_ID;
+    const parent = documentRef.body ?? documentRef.documentElement;
+    if (!parent || typeof parent.append !== 'function') return { element: null, created: false };
+    parent.append(launcher);
+    return { element: launcher, created: true };
+}
+
+function clonePresentationValue(value) {
+    if (Array.isArray(value)) return value.map(clonePresentationValue);
+    if (!value || typeof value !== 'object') return value;
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, clonePresentationValue(item)]));
+}
+
+function emptyPhoneEvent(platform = 'ios') {
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return {
+        kind: 'phone',
+        platform: phonePlatform(platform) === 'android' ? 'android' : 'ios',
+        layout: 'chat',
+        title: 'Phone',
+        meta: { time, battery: 'Wi-Fi 87%' },
+        rows: [{ role: 'system', time, text: 'No recent phone activity.' }],
+        visibility: 'public',
+    };
+}
+
 /** Presentation-only transient graphics layer. */
 export class GfxOverlay {
     constructor(options = {}) {
@@ -212,8 +276,15 @@ export class GfxOverlay {
         this.seen = new Set();
         this.sequence = 0;
         this.branchId = options.branchId === undefined ? null : text(options.branchId);
+        this.phoneEventProvider = typeof options.phoneEventProvider === 'function' ? options.phoneEventProvider : null;
+        this.latestPhoneEvent = null;
+        this.preferredPhonePlatform = 'ios';
         this.ownsRoot = Boolean(this.root && this.root.id === GFX_OVERLAY_ID && !options.root && !options.container);
+        const launcher = resolvePhoneLauncher(this.document);
+        this.launcher = launcher.element;
+        this.ownsLauncher = launcher.created;
         if (this.root) this.#prepareRoot();
+        if (this.launcher) this.#prepareLauncher();
     }
 
     #prepareRoot() {
@@ -226,13 +297,34 @@ export class GfxOverlay {
         this.root.hidden = !this.options.enabled;
     }
 
+    #prepareLauncher() {
+        this.launcher.className = 'st-gfx-phone-launcher';
+        this.launcher.type = 'button';
+        this.launcher.textContent = '📱';
+        this.launcher.setAttribute?.('aria-label', 'Open phone');
+        this.launcher.setAttribute?.('aria-pressed', 'false');
+        this.launcher.setAttribute?.('title', 'Open phone');
+        this.launcher.onclick = () => this.togglePhone();
+        this.launcher.hidden = !this.options.enabled;
+    }
+
+    #syncLauncher() {
+        if (!this.launcher) return;
+        const open = [...this.cards.values()].some((card) => card?.dataset?.media === 'phone');
+        this.launcher.setAttribute?.('aria-pressed', open ? 'true' : 'false');
+        this.launcher.setAttribute?.('aria-label', open ? 'Close phone' : 'Open phone');
+        this.launcher.setAttribute?.('title', open ? 'Close phone' : 'Open phone');
+    }
+
     configure(options = {}) {
+        if (typeof options.phoneEventProvider === 'function') this.phoneEventProvider = options.phoneEventProvider;
         const next = normaliseOptions({ ...this.options, ...options });
         this.options = next;
         if (this.root) {
             this.root.classList?.toggle('st-gfx-reduced-motion', next.reducedMotion);
             this.root.hidden = !next.enabled;
         }
+        if (this.launcher) this.launcher.hidden = !next.enabled;
         if (!next.enabled) this.clear();
         this.#trim();
         return this;
@@ -249,6 +341,10 @@ export class GfxOverlay {
             if (this.branchId !== null && branch !== this.branchId) this.replaceBranch(branch);
             else this.branchId = branch;
         }
+        if (mediaKind(event) === 'phone') {
+            this.latestPhoneEvent = clonePresentationValue(event);
+            this.preferredPhonePlatform = phonePlatform(event.platform ?? event.devicePlatform ?? this.preferredPhonePlatform);
+        }
         if (this.seen.has(id)) return this.cards.get(id) ?? null;
 
         const card = this.#card(event, id);
@@ -256,6 +352,7 @@ export class GfxOverlay {
         this.cards.set(id, card);
         this.root.append(card);
         this.#trim();
+        this.#syncLauncher();
         const ttl = calculateGfxDuration(event, this.options.duration);
         if (ttl > 0) {
             const timer = setTimeout(() => this.dismiss(id), ttl);
@@ -320,6 +417,7 @@ export class GfxOverlay {
         this.timers.delete(key);
         this.cards.delete(key);
         card.remove?.();
+        this.#syncLauncher();
         return true;
     }
 
@@ -334,7 +432,26 @@ export class GfxOverlay {
     clear() {
         for (const id of [...this.cards.keys()]) this.dismiss(id);
         this.seen.clear();
+        this.latestPhoneEvent = null;
+        this.#syncLauncher();
         return this;
+    }
+
+    /** Toggle the latest branch-bound phone, or a neutral empty shell. */
+    togglePhone() {
+        const visible = [...this.cards.entries()].find(([, card]) => card?.dataset?.media === 'phone');
+        if (visible) {
+            this.dismiss(visible[0]);
+            return null;
+        }
+        let provided = null;
+        try { provided = this.phoneEventProvider?.() ?? null; } catch { provided = null; }
+        const event = clonePresentationValue(this.latestPhoneEvent ?? provided ?? emptyPhoneEvent(this.preferredPhonePlatform));
+        event.id = `phone-launcher-${++this.sequence}`;
+        event.kind = 'phone';
+        event.visibility = 'public';
+        if (event.branchId === undefined && this.branchId !== null) event.branchId = this.branchId;
+        return this.show(event);
     }
 
     /** Clear cards and start a new branch, optionally rendering its events. */
@@ -354,7 +471,10 @@ export class GfxOverlay {
     destroy() {
         this.clear();
         if (this.ownsRoot) this.root?.remove?.();
+        if (this.ownsLauncher) this.launcher?.remove?.();
+        else if (this.launcher) this.launcher.onclick = null;
         this.root = null;
+        this.launcher = null;
         return this;
     }
 }
