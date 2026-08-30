@@ -1,4 +1,4 @@
-# ST-STATE v0.4.0-eval.5
+# ST-STATE v0.4.0-eval.6
 
 Browser-only, third-party [SillyTavern](https://docs.sillytavern.app/for-contributors/writing-extensions/) UI extension for ST-ENDGAME's durable state ledger and local in-world artifact renderer. It keeps canonical per-chat JSON in `chatMetadata.stState`, per-chat mode configuration in `chatMetadata.stStateConfig`, shadow parity in `chatMetadata.stStateShadow`, branch checkpoints in `chatMetadata.stStateBranches`, global preferences in `extensionSettings.stState`, and accepts the evaluative `ST_PATCH` and `ST_GFX` hidden line controls.
 
@@ -18,7 +18,7 @@ This release adds opt-in **Hybrid Native** while retaining evaluative Shadow and
 - Explicit `LEGACY`, `SHADOW`, `NATIVE`, and `RECOVERY` modes with global default and per-chat override.
 - Shadow handshake, compact hot-state pack, strict dry-run patch validation, actor/scene/ct parity diagnostics, and an isolated `stStateShadow` sidecar.
 - Active Unified Local Frame projection for Shadow and Hybrid Native prompts. It folds each selected actor's placement, activity, thoughts, and emotional residue into one deterministic record while keeping canonical storage normalized; unmatched material is retained explicitly.
-- One injected d20 pre-roll per present NPC. The model must choose the attempted action and lock that actor's DC before consulting the roll; unused rolls expire after the response.
+- One injected d20 pre-roll per present NPC. Before canonical actors exist, card/greeting names bootstrap the pool; an active-card fallback guarantees at least one roll. Bootstrap labels never create state. The model must choose the attempted action and lock that actor's DC before consulting the roll; unused rolls expire after the response.
 - Per-assistant-slot checkpoints with released SillyTavern swipe/edit/delete event handling. Selecting or generating another swipe restores the common pre-response state before that branch becomes canonical.
 - Backup-gated **Rebaseline selected branch**, **Clear current chat state**, and **Restore previous state** controls. Candidate patches never enter canonical history.
 - Strict `ST_GFX V1` line parser and local text-only artifact renderer for phone, terminal, paper, map, notice, credential, transaction, web, broadcast, data, image, monitor, and media pop-ins. Phone artifacts include distinct iPhone-like and Android-like chat, notification, call, and email layouts.

@@ -31,6 +31,7 @@ test('hot selector includes exact mentions, spotlight/on-screen actors, and dire
 
 test('protocol keeps an ordinary zero-delta RP turn NORMAL', () => {
     const prompt = buildProtocolPrompt(createEmptyState({ now: 1 })).text;
+    assert.match(prompt, /ST_DICE_POOL v1\nBOOTSTRAP:ACTIVE_CARD_NPC\|d20\|\d+\nEND_ST_DICE_POOL/);
     assert.match(prompt, /begin with the exact header required by the active preset/);
     assert.match(prompt, /Never place prose, legacy state, ST_PATCH, or ST_GFX before that header/);
     assert.match(prompt, /Ordinary RP always uses NORMAL, even with no data lines/);
@@ -65,5 +66,15 @@ test('Hybrid Native injects local frame, authoritative patch rules, compatibilit
     assert.match(prompt.text, /exactly one hidden ST_PATCH/);
     assert.doesNotMatch(formatDicePool(prompt.selection, { rollProvider: () => 9 }), /US\|d20/);
     assert.doesNotMatch(formatDicePool(prompt.selection, { rollProvider: () => 9 }), /BO\|d20/);
+});
+
+test('dice pool bootstraps from the card name before canonical actors exist', () => {
+    const prompt = buildProtocolPrompt(createEmptyState({ now: 1 }), {
+        mode: 'NATIVE',
+        bootstrapNpcNames: ['Alice'],
+        rollProvider: () => 11,
+    });
+    assert.match(prompt.dicePool, /BOOTSTRAP:Alice\|d20\|11/);
+    assert.match(prompt.text, /Bootstrap labels allocate dice only: never create or patch an actor from them/);
 });
 

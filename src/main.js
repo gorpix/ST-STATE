@@ -947,6 +947,11 @@ export async function stStateGenerateInterceptor(chat, _contextSize, abort, type
     runtimeState.adapter?.noteGenerationType?.(type);
     const chatArray = Array.isArray(chat) ? chat : [];
     const latestUser = [...chatArray].reverse().find((message) => message?.is_user === true || message?.role === 'user');
+    const bootstrapNpcNames = [...new Set([
+        ...chatArray.filter((message) => message?.is_user !== true && message?.role !== 'user')
+            .map((message) => String(message?.name ?? message?.character_name ?? '').trim()),
+        runtimeState.adapter?.getCharacterName?.(),
+    ].filter(Boolean))].slice(0, 12);
     const generationType = String(type ?? 'normal').trim().toLowerCase();
     let verifiedBranchBaseline = false;
     const activeMode = runtimeState.engine.getMode?.();
@@ -979,6 +984,7 @@ export async function stStateGenerateInterceptor(chat, _contextSize, abort, type
     }
     const result = await runtimeState.engine.injectPrompt(type, {
         userText: latestUser ? messageText(latestUser) : runtimeState.engine.latestUserText(),
+        bootstrapNpcNames,
         verifiedBranchBaseline,
     });
     if (result?.mode === 'SHADOW' && ['baseline_required', 'baseline_stale'].includes(result?.reason)) abort?.(true);

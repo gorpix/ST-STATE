@@ -37,6 +37,11 @@ export class HostAdapter {
         return String(context?.name1 ?? '').trim();
     }
 
+    getCharacterName() {
+        const context = this.context();
+        return String(context?.name2 ?? '').trim();
+    }
+
     getSettings() {
         const context = this.context();
         if (!context || typeof context.extensionSettings !== 'object' || context.extensionSettings === null) return null;
