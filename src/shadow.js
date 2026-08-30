@@ -243,7 +243,7 @@ export function shadowHandshake(state, { mode = 'SHADOW' } = {}) {
         'schema=2',
         `mode=${normalized}`,
         'preset=ST-ENDGAME',
-        'legacy=internal_states',
+        `legacy=${normalized === 'NATIVE' ? 'changed_unsupported_sections' : 'internal_states'}`,
         'patch=ST_PATCH',
         'flash=flash_handoff',
         `stateCt=${Number.isInteger(current.ct) ? current.ct : 0}`,

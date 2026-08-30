@@ -8,6 +8,7 @@ import {
     invalidateAssistantDelete,
     invalidateAssistantEdit,
     normalizeBranchLedger,
+    recordAssistantSwipeResult,
     selectAssistantSwipe,
     stableSwipeIdentity,
 } from '../src/branch.js';
@@ -44,6 +45,22 @@ test('checkpoint is captured once and selecting a different swipe returns the sa
     assert.deepEqual(second.checkpoint.scene.openBeat, 'before response');
     assert.notEqual(second.checkpoint, changed);
     assert.equal(second.ledger.slots['slot:m1'].selectedSwipeIndex, 1);
+});
+
+test('Native swipe results retain a bounded replay diff', () => {
+    const before = state();
+    let ledger = checkpointAssistantSlot(createBranchLedger(), { messageId: 'native', state: before, swipeIndex: 0 }).ledger;
+    const after = structuredClone(before);
+    after.ct = 5; after.head = 'h-5'; after.scene.openBeat = 'after response';
+    const recorded = recordAssistantSwipeResult(ledger, {
+        messageId: 'native', swipeIndex: 0, mode: 'NATIVE', state: after,
+        diff: [{ path: 'ct', before: 4, after: 5 }, { path: 'head', before: 'h-4', after: 'h-5' }],
+    });
+    assert.equal(recorded.ok, true);
+    assert.equal(recorded.swipe.commitMode, 'NATIVE');
+    assert.equal(recorded.swipe.commitCt, 5);
+    assert.equal(recorded.swipe.commitHead, 'h-5');
+    assert.equal(recorded.swipe.diff.length, 2);
 });
 
 test('edit and delete invalidation do not alter checkpoint or canonical ct', () => {

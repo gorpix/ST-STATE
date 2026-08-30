@@ -115,16 +115,29 @@ export function selectHotState(state, options = {}) {
     const relationKeys = new Set(Object.values(source.relations?.pairs ?? {}).filter((relation) => hotIds.has(relation.a) || hotIds.has(relation.b)).map((relation) => `${relation.a}|${relation.b}`));
     const actors = {};
     for (const id of ordered) if (source.actors[id]) actors[id] = compactActor(source.actors[id], id);
+    const presentActorIds = ordered.filter((id) => id !== 'US' && (spotlight.has(id) || isOnScreenActor(source, id, source.actors?.[id], options)));
     return {
         meta: { ct: Number.isInteger(source.ct) ? source.ct : 0, head: String(source.head ?? '') },
         scene: compactScene(source.scene, hotIds),
         actors,
         relations,
         selectedActorIds: ordered,
+        presentActorIds,
         selectedRelationKeys: [...relationKeys],
         coldActorIds: Object.keys(source.actors ?? {}).filter((id) => !hotIds.has(id)),
         coldRelationKeys: Object.keys(source.relations?.pairs ?? {}).filter((key) => !relationKeys.has(key)),
     };
+}
+
+function d20(options, actorId, index) {
+    const provided = options.rollProvider?.({ actorId, index, sides: 20 });
+    if (Number.isInteger(provided) && provided >= 1 && provided <= 20) return provided;
+    return Math.floor(Math.random() * 20) + 1;
+}
+
+export function formatDicePool(selection, options = {}) {
+    const ids = (selection.presentActorIds ?? []).slice(0, 12);
+    return ['ST_DICE_POOL v1', ...ids.map((id, index) => `${id}|d20|${d20(options, id, index)}`), 'END_ST_DICE_POOL'].join('\n');
 }
 
 function compactJson(value) {
@@ -142,11 +155,31 @@ export function formatHotStatePack(selection) {
 export function buildProtocolPrompt(state, options = {}) {
     const selection = selectHotState(state, options);
     const mode = String(options.mode ?? 'SHADOW').trim().toUpperCase();
-    if (mode !== 'SHADOW') return { text: shadowHandshake(state, { mode }), selection, mode };
     const localFrame = projectUnifiedLocalFrame(state, {
         selectedActorIds: selection.selectedActorIds,
         includeUnassigned: false,
     });
+    const dicePool = formatDicePool(selection, options);
+    if (mode === 'NATIVE') {
+        const protocol = [
+            shadowHandshake(state, { mode }),
+            'ST-STATE HYBRID NATIVE TRANSACTION PROTOCOL v1',
+            'Write ordinary visible prose first. Never output the full legacy state. Append exactly one hidden ST_PATCH on every NORMAL turn; it is authoritative and is applied atomically by ST-STATE.',
+            'Patch transport is line-based, never JSON. Headers: V2, base=<current head>, mode=NORMAL, tx=<short stable turn identity>. Do not use braces, commas, JSON quoting, markdown fences, or an END line.',
+            'Allowed native data lines only: actor.set|ID|field|value ; actor.create|ID|field|value ; scene.set|field|value ; scene.position|ID|value ; relation.set|A|B|bond|value ; relation.set|A|B|sparks|value ; relation.set|A|B|grudge|value. Emit only fields changed this turn; a zero-delta NORMAL patch still advances ct exactly once.',
+            'Copy actor IDs exactly from ST_LOCAL_FRAME. Patch VAD valence/arousal/dominance must each be finite numbers from -2..2. Relationship ranges: bond -5..20; sparks and grudge 0..100.',
+            'ST_DICE_POOL contains one pre-roll for each present NPC. First choose the attempted action and lock that actor\'s DC without consulting its number; only then consume that actor\'s roll if the completed action actually requires a check. Never choose or revise an action to fit a roll. Unused rolls expire after this response.',
+            'Actors, Scene & World, ct, and numeric Bond/Sparks/Grudge are native. Never repeat their legacy NPC STATE, SCENE & WORLD, or numeric BONDS rows.',
+            'Compatibility fallback for unsupported domains only: if and only if Factions, relationship Profiles, Emotional Residue, Quests, Inventory, Chekhov, Internal Thoughts, GM Notebook, DND, or World Sim changed, append one partial <internal_states> block with the next Turn header and only those changed sections. Omit every unchanged unsupported section. ST-STATE merges this fragment before applying the native patch.',
+            'OOC and FLASH freeze state. A flash_handoff wins. They emit no legacy fragment; use an ST_PATCH envelope with mode=OOC or mode=FLASH when a route marker is needed.',
+            'Place the compatibility fragment before ST_PATCH. Put ST_PATCH after GFX_END when a compatibility fragment exists. Optional ST_GFX follows ST_PATCH and remains the final control.',
+            `<!--ST_PATCH\nV2\nbase=${selection.meta.head}\nmode=NORMAL\ntx=turn-${selection.meta.ct + 1}\n-->`,
+            dicePool,
+            formatUnifiedLocalFrame(localFrame),
+        ];
+        return { text: protocol.join('\n'), selection, localFrame, dicePool, mode };
+    }
+    if (mode !== 'SHADOW') return { text: shadowHandshake(state, { mode }), selection, localFrame, dicePool, mode };
     const protocol = [
         shadowHandshake(state, { mode }),
         'ST-STATE SHADOW TRANSACTION PROTOCOL v1',
@@ -158,11 +191,13 @@ export function buildProtocolPrompt(state, options = {}) {
         'For every emitted data line, copy the value character-for-character from the corresponding field in the complete <internal_states> block you just wrote; never summarize or paraphrase it. The only exception is VAD, which must be numerically clamped to the patch range below.',
         'Patch VAD contract: valence, arousal, and dominance must each be finite numbers clamped to -2..2, even if legacy prose/state used a wider value. Copy actor IDs exactly from ST_LOCAL_FRAME; never derive, rename, or replace them.',
         'Relationship ranges: bond is an integer from -5..20; sparks and grudge are integers from 0..100. Copy both actor IDs and values from the matching RELATION row. Do not emit arbitrary paths, unknown fields, profiles, or other mechanics reducers. Always emit both the required internal-state HTML block and ST_PATCH for NORMAL.',
+        'ST_DICE_POOL contains one pre-roll for each present NPC. First choose the attempted action and lock that actor\'s DC without consulting its number; only then consume that actor\'s roll if the completed action actually requires a check. Never choose or revise an action to fit a roll. Unused rolls expire after this response.',
         'Ordinary RP always uses NORMAL, even with no data lines; ct still advances. Use OOC only for an out-of-character answer and FLASH only when the router chooses FLASH. Never invent values. Put ST_PATCH outside and after <!-- GFX_END -->.',
         `<!--ST_PATCH\nV2\nbase=${selection.meta.head}\nmode=NORMAL\ntx=turn-${selection.meta.ct + 1}\n-->`,
+        dicePool,
         formatUnifiedLocalFrame(localFrame),
     ];
-    return { text: protocol.join('\n'), selection, localFrame, mode };
+    return { text: protocol.join('\n'), selection, localFrame, dicePool, mode };
 }
 
 export const buildHotStatePack = (state, options = {}) => formatHotStatePack(selectHotState(state, options));

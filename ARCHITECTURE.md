@@ -1,6 +1,6 @@
 # ST-STATE v0.4 evaluative architecture
 
-ST-STATE is the state-engine half of ST-ENDGAME's transition to a required bundled extension. This evaluative release observes the existing `<internal_states>` contract before Native mode is unlocked.
+ST-STATE is the state-engine half of ST-ENDGAME's transition to a required bundled extension. This evaluative release retains Shadow parity and adds opt-in Hybrid Native authority for the implemented reducers.
 
 ## Authority and storage
 
@@ -24,7 +24,7 @@ The state document is versioned (`schemaVersion: 2`) and includes the legacy sec
 
 ## Modes
 
-`LEGACY` is the global default and is fully inert. `SHADOW` is the only mode that injects the handshake/hot pack, evaluates ST_PATCH, and processes model-provided ST_GFX hints. `NATIVE` is represented in the protocol model but locked and coerced to `LEGACY` by settings controls. `RECOVERY` is read-only for incoming messages; JSON backup restore is explicit and confirmation-gated. Each atomic Shadow commit stores a pre-import recovery snapshot with its isolated parity report in `stStateShadow`; candidate history never becomes canonical history.
+`LEGACY` is the global default and is fully inert. `SHADOW` injects the handshake/local frame, evaluates ST_PATCH, and keeps legacy authoritative. Opt-in `NATIVE` injects the local frame and commits validated actor, scene, and numeric relation operations without a full legacy block; changed unsupported sections may arrive in a partial compatibility fragment. `RECOVERY` is read-only for incoming messages. Each atomic Shadow commit stores a pre-import recovery snapshot with its isolated parity report in `stStateShadow`; Native commits use canonical history and bounded branch diffs instead.
 
 ## Local artifact boundary
 
@@ -32,7 +32,7 @@ The model emits structured plain-text arguments, never HTML. `gfx.js` validates 
 
 ## M2 scope boundary
 
-The implemented reducers are deliberately limited to `actor.set`, `actor.create`, and `scene.set`, with `NORMAL`, `OOC`, and `FLASH` routing. Relationship, agenda, residue, inventory, Chekhov, DND, clocks, knowledge, commitments, persistent artifact state, and full Flash mechanics are represented in the schema/import/export surface but have no M2 mutation reducers. Local artifact rendering is presentation-only and does not widen this mutation boundary.
+The implemented reducers are deliberately limited to `actor.set`, `actor.create`, `scene.set`, and numeric `relation.set` for Bond/Sparks/Grudge, with `NORMAL`, `OOC`, and `FLASH` routing. Directional relationship profiles, factions, residue, quests, inventory, Chekhov, thoughts, notebook, DND, World Sim, clocks, knowledge, commitments, persistent artifact state, and full Flash mechanics remain compatibility-backed or schema-only. Local artifact rendering is presentation-only and does not widen this mutation boundary.
 
 ## Host integration and degradation
 

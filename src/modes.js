@@ -9,12 +9,12 @@
  */
 
 export const ENGINE_MODES = Object.freeze(['LEGACY', 'SHADOW', 'NATIVE', 'RECOVERY']);
-export const SELECTABLE_MODES = Object.freeze(['LEGACY', 'SHADOW', 'RECOVERY']);
+export const SELECTABLE_MODES = Object.freeze(['LEGACY', 'SHADOW', 'NATIVE', 'RECOVERY']);
 export const DEFAULT_ENGINE_MODE = 'LEGACY';
 export const SETTINGS_KEY = 'stState';
 export const CHAT_CONFIG_KEY = 'stStateConfig';
 export const SHADOW_SIDECAR_KEY = 'stStateShadow';
-export const NATIVE_MODE_LOCKED = true;
+export const NATIVE_MODE_LOCKED = false;
 
 function asObject(value) {
     return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
@@ -24,14 +24,13 @@ export function isEngineMode(value) {
     return typeof value === 'string' && ENGINE_MODES.includes(value.trim().toUpperCase());
 }
 
-/** Normalize untrusted mode input. NATIVE is intentionally coerced away. */
+/** Normalize untrusted mode input against the selectable runtime modes. */
 export function normalizeEngineMode(value, { fallback = DEFAULT_ENGINE_MODE } = {}) {
     const candidate = typeof value === 'string' ? value.trim().toUpperCase() : '';
     const safeFallback = SELECTABLE_MODES.includes(String(fallback).trim().toUpperCase())
         ? String(fallback).trim().toUpperCase()
         : DEFAULT_ENGINE_MODE;
     if (!ENGINE_MODES.includes(candidate)) return safeFallback;
-    if (candidate === 'NATIVE') return safeFallback;
     return candidate;
 }
 
@@ -81,8 +80,8 @@ export function readChatMode(metadata) {
 
 export function getChatMode(metadata, settings) {
     const requested = readChatMode(metadata);
-    if (requested && requested !== 'NATIVE') return requested;
-    return requested === 'NATIVE' ? DEFAULT_ENGINE_MODE : getGlobalDefaultMode(settings);
+    if (requested) return requested;
+    return getGlobalDefaultMode(settings);
 }
 
 export function setChatMode(metadata, mode, { now = Date.now() } = {}) {
@@ -100,11 +99,12 @@ export function setChatMode(metadata, mode, { now = Date.now() } = {}) {
 
 export function modeCapabilities(mode) {
     const normalized = normalizeEngineMode(mode);
+    const transactional = normalized === 'SHADOW' || normalized === 'NATIVE';
     return {
         mode: normalized,
-        inject: normalized === 'SHADOW',
-        process: normalized === 'SHADOW',
-        canonicalWrites: normalized === 'SHADOW',
+        inject: transactional,
+        process: transactional,
+        canonicalWrites: transactional,
         candidateWrites: false,
         nativeLocked: NATIVE_MODE_LOCKED,
         recoveryWrites: normalized === 'RECOVERY',
@@ -117,7 +117,7 @@ export function describeMode(mode) {
         mode: normalized,
         label: normalized[0] + normalized.slice(1).toLowerCase(),
         selectable: SELECTABLE_MODES.includes(normalized),
-        locked: normalized === 'NATIVE',
+        locked: false,
     };
 }
 

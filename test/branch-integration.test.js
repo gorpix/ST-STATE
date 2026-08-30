@@ -120,6 +120,41 @@ test('new and existing swipes restore one pre-response checkpoint without ct dri
     } finally { resetRuntime(); }
 });
 
+test('Hybrid Native stores and replays each swipe diff from the shared checkpoint', async () => {
+    const { context, store, initial } = setup();
+    try {
+        setChatMode(context.chatMetadata, 'NATIVE', { now: 1 });
+        const nativeReply = (openBeat, tx) => `Reply ${openBeat} <!--ST_PATCH\nV2\nbase=${initial.head}\nmode=NORMAL\ntx=${tx}\nscene.set|openBeat|${openBeat}\n-->`;
+        const firstRaw = nativeReply('first native branch', 'native-a');
+        const message = { is_user: false, mes: firstRaw, extra: {}, swipe_id: 0, swipes: [firstRaw], swipe_info: [{ send_date: 'native-a', extra: {} }] };
+        context.chat.push(message);
+        const first = await handleMessageReceived({ messageId: 1 });
+        assert.equal(first.status, 'native_committed');
+        assert.equal(store.load().scene.openBeat, 'first native branch');
+
+        message.swipe_id = 1;
+        const pending = await handleMessageSwiped(1);
+        assert.equal(pending.status, 'branch_checkpoint');
+        assert.equal(store.load().ct, 0);
+
+        const secondRaw = nativeReply('second native branch', 'native-b');
+        message.mes = secondRaw;
+        message.swipes.push(secondRaw);
+        message.swipe_info.push({ send_date: 'native-b', extra: {} });
+        const second = await handleMessageReceived({ messageId: 1 });
+        assert.equal(second.status, 'native_committed');
+        assert.equal(store.load().scene.openBeat, 'second native branch');
+
+        message.swipe_id = 0;
+        message.mes = message.swipes[0];
+        const selected = await handleMessageSwiped(1);
+        assert.equal(selected.status, 'branch_selected');
+        assert.equal(selected.replayed, true);
+        assert.equal(store.load().ct, 1);
+        assert.equal(store.load().scene.openBeat, 'first native branch');
+    } finally { resetRuntime(); }
+});
+
 test('background swipe generation restores its checkpoint without selecting the pending swipe', async () => {
     const { context, store, initial } = setup();
     try {

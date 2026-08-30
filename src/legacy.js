@@ -37,6 +37,30 @@ export function extractLatestInternalStates(input) {
     return { ok: true, raw, wrappedRaw, wrapper: wrappedRaw !== raw ? 'GFX' : '', body: raw.slice(openEnd, closeStart), index: match.index ?? -1 };
 }
 
+/** Remove legacy compatibility payloads after Native has persisted them. */
+export function removeInternalStatesPayload(input) {
+    let source = String(input ?? '');
+    for (let count = 0; count < 20; count += 1) {
+        const block = extractLatestInternalStates(source);
+        if (!block.ok) break;
+        const target = block.wrappedRaw || block.raw;
+        const index = source.lastIndexOf(target);
+        if (index < 0) break;
+        source = source.slice(0, index) + source.slice(index + target.length);
+    }
+    return source;
+}
+
+export function stripMessageInternalStatesPayload(message) {
+    if (!message || typeof message !== 'object') return message;
+    const clean = (value) => removeInternalStatesPayload(value);
+    if (Object.prototype.hasOwnProperty.call(message, 'mes')) message.mes = clean(message.mes);
+    else if (Object.prototype.hasOwnProperty.call(message, 'message')) message.message = clean(message.message);
+    else if (Object.prototype.hasOwnProperty.call(message, 'content')) message.content = clean(message.content);
+    if (Array.isArray(message.swipes)) message.swipes = message.swipes.map(clean);
+    return message;
+}
+
 /** Parse nested details without using innerHTML or trusting model markup. */
 export function parseDetailsTree(input) {
     const source = String(input ?? '');

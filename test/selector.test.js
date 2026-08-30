@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createEmptyState } from '../src/schema.js';
-import { selectHotState, buildHotStatePack, buildProtocolPrompt } from '../src/selector.js';
+import { selectHotState, buildHotStatePack, buildProtocolPrompt, formatDicePool } from '../src/selector.js';
 
 test('hot selector includes exact mentions, spotlight/on-screen actors, and direct relations only', () => {
     const state = createEmptyState({ now: 1 });
@@ -41,5 +41,25 @@ test('protocol keeps an ordinary zero-delta RP turn NORMAL', () => {
     assert.match(prompt, /Omitted sections and omitted cold actor\/relation\/position rows are carried forward unchanged/);
     assert.match(prompt, /Include NPC STATE, BONDS, and SCENE & WORLD on every NORMAL turn/);
     assert.doesNotMatch(prompt, /If no NORMAL semantic change is known, use mode OOC or FLASH/);
+});
+
+test('Hybrid Native injects local frame, authoritative patch rules, compatibility boundary, and present-NPC pre-rolls', () => {
+    const state = createEmptyState({ now: 1 });
+    state.actors = {
+        US: { id: 'US', name: 'User', at: 'room' },
+        AL: { id: 'AL', name: 'Alice', at: 'room' },
+        BO: { id: 'BO', name: 'Bob', at: 'elsewhere' },
+    };
+    state.scene.positions = { AL: 'room' };
+    const prompt = buildProtocolPrompt(state, { mode: 'NATIVE', rollProvider: () => 14 });
+    assert.match(prompt.text, /mode=NATIVE/);
+    assert.match(prompt.text, /ST-STATE HYBRID NATIVE TRANSACTION PROTOCOL v1/);
+    assert.match(prompt.text, /ST_LOCAL_FRAME v1/);
+    assert.match(prompt.text, /ST_DICE_POOL v1\nAL\|d20\|14\nEND_ST_DICE_POOL/);
+    assert.match(prompt.text, /Never output the full legacy state/);
+    assert.match(prompt.text, /only those changed sections/);
+    assert.match(prompt.text, /exactly one hidden ST_PATCH/);
+    assert.doesNotMatch(formatDicePool(prompt.selection, { rollProvider: () => 9 }), /US\|d20/);
+    assert.doesNotMatch(formatDicePool(prompt.selection, { rollProvider: () => 9 }), /BO\|d20/);
 });
 

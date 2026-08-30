@@ -1,9 +1,9 @@
 import { ChatSwitchError } from './store.js';
-import { applyTransaction } from './reducer.js';
+import { applyTransaction, makeDiff, summarizeDiff } from './reducer.js';
 import { buildProtocolPrompt } from './selector.js';
 import { extractHiddenPatch, messageText, stripMessageControlPayload } from './patch.js';
 import { transactionIdentity } from './identity.js';
-import { importLegacyState } from './legacy.js';
+import { extractLatestInternalStates, importLegacyState, stripMessageInternalStatesPayload } from './legacy.js';
 import { DiagnosticLog } from './diagnostics.js';
 import { CHAT_CONFIG_KEY, DEFAULT_ENGINE_MODE, ENGINE_MODES, getChatMode, getGlobalDefaultMode, normalizeEngineMode } from './modes.js';
 import { compareShadowParity, makeShadowSidecar } from './shadow.js';
@@ -11,7 +11,7 @@ import { deepClone, sanitizePlainText } from './util.js';
 
 export const SKIP_GENERATION_TYPES = new Set(['quiet', 'impersonate', 'continue']);
 
-export function recordControlMetadata(message, extracted, result, at) {
+export function recordControlMetadata(message, extracted, result, at, { swipeIdentity = '' } = {}) {
     if (!message || typeof message !== 'object') return;
     if (!message.extra || typeof message.extra !== 'object' || Array.isArray(message.extra)) message.extra = {};
     const record = {
@@ -27,6 +27,12 @@ export function recordControlMetadata(message, extracted, result, at) {
     if (result?.transactionId) record.transactionId = sanitizePlainText(result.transactionId, { maxLength: 200, preserveNewlines: false });
     if (Array.isArray(result?.errors) && result.errors.length) record.errors = result.errors.map((error) => sanitizePlainText(error, { maxLength: 1000, preserveNewlines: false }));
     message.extra.stState = record;
+    if (swipeIdentity) {
+        if (!message.extra.stStateSwipes || typeof message.extra.stStateSwipes !== 'object' || Array.isArray(message.extra.stStateSwipes)) message.extra.stStateSwipes = {};
+        message.extra.stStateSwipes[swipeIdentity] = deepClone(record);
+        const keys = Object.keys(message.extra.stStateSwipes);
+        for (const key of keys.slice(0, Math.max(0, keys.length - 20))) delete message.extra.stStateSwipes[key];
+    }
 }
 
 function requestedMode(adapter) {
@@ -39,7 +45,66 @@ function requestedMode(adapter) {
 
 function canonicalMode(adapter) {
     const requested = requestedMode(adapter);
-    return requested === 'NATIVE' ? DEFAULT_ENGINE_MODE : normalizeEngineMode(requested);
+    return normalizeEngineMode(requested);
+}
+
+const NATIVE_COMPATIBILITY_ROOTS = Object.freeze([
+    ['FACTIONS', 'factions'],
+    ['EMOTIONAL RESIDUE', 'residue'],
+    ['QUESTS', 'quests'],
+    ['INV & SKILLS', 'inventory'],
+    ["CHEKHOV'S GUN", 'chekhov'],
+    ['INTERNAL THOUGHTS', 'thoughts'],
+    ["GM'S NOTEBOOK", 'notebook'],
+    ['DND TASK SIM', 'lastDnd'],
+]);
+
+function stageNativeCompatibility(raw, state, { now, userName } = {}) {
+    const block = extractLatestInternalStates(raw);
+    if (!block.ok) return { ok: true, found: false, state: deepClone(state), missingSections: [] };
+    const imported = importLegacyState(raw, {
+        now,
+        baseState: state,
+        preserveMissingFromBase: true,
+        mergeSparseFromBase: true,
+        requireTurn: true,
+        userName,
+    });
+    if (!imported.ok) return { ok: false, found: true, state: deepClone(state), errors: imported.diagnostics ?? ['Invalid Native compatibility fragment'] };
+    if (imported.state.ct !== state.ct + 1) {
+        return { ok: false, found: true, state: deepClone(state), errors: [`Compatibility turn ${imported.state.ct} did not follow canonical turn ${state.ct}`] };
+    }
+    const staged = deepClone(state);
+    const missing = new Set(imported.missingSections ?? []);
+    for (const [section, root] of NATIVE_COMPATIBILITY_ROOTS) {
+        if (!missing.has(section)) staged[root] = deepClone(imported.state[root]);
+    }
+    if (!missing.has('BONDS')) staged.relations.profiles = deepClone(imported.state.relations?.profiles ?? {});
+    if (/WORLD\s+SIM/i.test(block.raw)) staged.worldSim = deepClone(imported.state.worldSim);
+    staged.opaque = deepClone(imported.state.opaque ?? staged.opaque);
+    // Compatibility data is staged against the current transaction base. The
+    // authoritative Native patch below owns ct/head/history exactly once.
+    staged.ct = state.ct;
+    staged.head = state.head;
+    staged.meta = deepClone(state.meta);
+    staged.history = deepClone(state.history ?? []);
+    staged.dedupe = deepClone(state.dedupe ?? []);
+    return { ok: true, found: true, state: staged, missingSections: imported.missingSections ?? [] };
+}
+
+function includeCompatibilityInCommit(result, before) {
+    if (result.status !== 'committed') return result;
+    const diff = makeDiff(before, result.state);
+    const history = [...(result.state.history ?? [])];
+    const entry = history.at(-1);
+    if (entry) {
+        entry.diff = deepClone(diff);
+        entry.summary = summarizeDiff(diff);
+        result.historyEntry = deepClone(entry);
+    }
+    result.state.history = history;
+    result.diff = diff;
+    return result;
 }
 
 export function preserveCanonicalBookkeeping(imported, previous) {
@@ -139,35 +204,37 @@ export class STStateEngine {
             this.adapter.clearPrompt();
             return { injected: false, skipped: true, type: generationType, mode };
         }
-        if (mode !== 'SHADOW') {
+        if (mode !== 'SHADOW' && mode !== 'NATIVE') {
             this.adapter.clearPrompt();
-            const reason = mode === 'LEGACY' ? 'legacy_mode' : mode === 'RECOVERY' ? 'recovery_mode' : 'native_locked';
+            const reason = mode === 'LEGACY' ? 'legacy_mode' : 'recovery_mode';
             this.diagnostics.info('MODE_NO_INJECT', `Prompt injection disabled in ${mode} mode`);
             return { injected: false, skipped: true, type: generationType, mode, reason };
         }
         const state = this.loadState({ initialize: false });
-        const baseline = options.verifiedBranchBaseline === true
-            ? { status: 'verified_branch', ready: true }
-            : inspectShadowBaseline(this.adapter, state, { now: this.now() });
-        if (baseline.status === 'missing' || baseline.status === 'incomplete') {
-            this.adapter.clearPrompt();
-            this.diagnostics.warn('BASELINE_REQUIRED', 'Import the latest usable legacy state before Shadow prompt injection.');
-            return { injected: false, skipped: true, type: generationType, mode, reason: 'baseline_required', baseline };
-        }
-        if (baseline.status === 'stale') {
-            this.adapter.clearPrompt();
-            const mismatch = baseline.canonical.ct === baseline.legacy.ct
-                ? `Canonical state differs from the selected branch at ct ${baseline.canonical.ct}`
-                : `Canonical ct ${baseline.canonical.ct} does not match selected branch ct ${baseline.legacy.ct}`;
-            const message = `${mismatch}. Rebaseline selected branch before generating.`;
-            this.diagnostics.warn('BASELINE_STALE', message, baseline);
-            this.adapter.notify?.('warning', `ST-STATE blocked generation: ${message}`);
-            return { injected: false, skipped: true, type: generationType, mode, reason: 'baseline_stale', baseline };
+        if (mode === 'SHADOW') {
+            const baseline = options.verifiedBranchBaseline === true
+                ? { status: 'verified_branch', ready: true }
+                : inspectShadowBaseline(this.adapter, state, { now: this.now() });
+            if (baseline.status === 'missing' || baseline.status === 'incomplete') {
+                this.adapter.clearPrompt();
+                this.diagnostics.warn('BASELINE_REQUIRED', 'Import the latest usable legacy state before Shadow prompt injection.');
+                return { injected: false, skipped: true, type: generationType, mode, reason: 'baseline_required', baseline };
+            }
+            if (baseline.status === 'stale') {
+                this.adapter.clearPrompt();
+                const mismatch = baseline.canonical.ct === baseline.legacy.ct
+                    ? `Canonical state differs from the selected branch at ct ${baseline.canonical.ct}`
+                    : `Canonical ct ${baseline.canonical.ct} does not match selected branch ct ${baseline.legacy.ct}`;
+                const message = `${mismatch}. Rebaseline selected branch before generating.`;
+                this.diagnostics.warn('BASELINE_STALE', message, baseline);
+                this.adapter.notify?.('warning', `ST-STATE blocked generation: ${message}`);
+                return { injected: false, skipped: true, type: generationType, mode, reason: 'baseline_stale', baseline };
+            }
         }
         try {
             const prompt = this.buildPrompt({ ...options, mode });
             this.adapter.setPrompt(prompt.text);
-            this.diagnostics.info('PROMPT_INJECTED', `Shadow protocol injected for ${generationType}`, { selected: prompt.selection.selectedActorIds, mode });
+            this.diagnostics.info('PROMPT_INJECTED', `${mode === 'NATIVE' ? 'Hybrid Native' : 'Shadow'} protocol injected for ${generationType}`, { selected: prompt.selection.selectedActorIds, mode });
             return { injected: true, skipped: false, type: generationType, mode, selection: prompt.selection, text: prompt.text };
         } catch (error) {
             this.diagnostics.warn('PROMPT_UNAVAILABLE', `Prompt injection unavailable: ${error.message}`);
@@ -194,11 +261,83 @@ export class STStateEngine {
             this.diagnostics.info('RECOVERY_MODE', 'Recovery mode is read-only for incoming turns.', { messageIndex: index });
             return { status: 'recovery_read_only', mode: activeMode, state: this.loadState(), displayText: raw, extracted: null, persisted: false };
         }
-        if (activeMode === 'NATIVE' || this.getRequestedMode() === 'NATIVE') {
-            this.diagnostics.warn('NATIVE_LOCKED', 'Native mode is locked in this evaluator; no incoming turn was processed.', { messageIndex: index });
-            return { status: 'native_locked', mode: 'NATIVE', state: this.loadState(), displayText: raw, extracted: null, persisted: false };
-        }
+        if (activeMode === 'NATIVE') return this._processNativeMessage(message, { index, messageIdentity, expectedChatId, raw });
         return this._processShadowMessage(message, { index, messageIdentity, expectedChatId, raw });
+    }
+
+    async _processNativeMessage(message, { index = -1, messageIdentity = '', expectedChatId = undefined, raw }) {
+        const extracted = extractHiddenPatch(raw);
+        const state = this.loadState();
+        const identity = messageIdentity || `message:${index}`;
+        const targetChatId = expectedChatId === undefined ? this.adapter.getChatId?.() : expectedChatId;
+        const cleanup = async (result) => {
+            recordControlMetadata(message, extracted, result, this.now(), { swipeIdentity: identity });
+            stripMessageControlPayload(message);
+            stripMessageInternalStatesPayload(message);
+            try { await this.adapter.saveChat?.({ expectedChatId: targetChatId }); }
+            catch (error) { this.diagnostics.warn('MESSAGE_SAVE', `Native control cleanup could not be persisted: ${error.message}`); }
+        };
+
+        if (extracted.flashHandoff) {
+            const result = { status: 'ignored', reason: 'flash_handoff', mode: 'NATIVE', state, displayText: extracted.prose, extracted, persisted: false };
+            await cleanup(result);
+            return result;
+        }
+        if (!extracted.found || !extracted.ok) {
+            const status = extracted.found ? 'native_malformed' : 'native_missing';
+            const errors = [extracted.error || 'No usable ST_PATCH comment was found'];
+            const result = { status, mode: 'NATIVE', state, displayText: extracted.prose, extracted, errors, persisted: false };
+            this.diagnostics.warn('NATIVE_PATCH', `Hybrid Native turn was not committed: ${errors[0]}`, { messageIndex: index });
+            if (extracted.controlBearing || extractLatestInternalStates(raw).ok) await cleanup(result);
+            return result;
+        }
+
+        if (['OOC', 'FLASH'].includes(String(extracted.patch.mode).toUpperCase())) {
+            const frozen = applyTransaction(state, extracted.patch, { messageIdentity: identity, flashHandoff: false, now: this.now() });
+            const result = { ...frozen, status: 'ignored', reason: frozen.reason, mode: 'NATIVE', state, displayText: extracted.prose, extracted, persisted: false };
+            await cleanup(result);
+            return result;
+        }
+
+        const compatibility = stageNativeCompatibility(raw, state, { now: this.now(), userName: this.adapter?.getUserName?.() });
+        if (!compatibility.ok) {
+            const result = { status: 'native_compatibility_rejected', mode: 'NATIVE', state, displayText: extracted.prose, extracted, errors: compatibility.errors, persisted: false };
+            this.diagnostics.warn('NATIVE_COMPATIBILITY', `Hybrid Native compatibility state was rejected: ${(compatibility.errors ?? []).join('; ')}`, { messageIndex: index });
+            await cleanup(result);
+            return result;
+        }
+
+        let applied = applyTransaction(compatibility.state, extracted.patch, { messageIdentity: identity, flashHandoff: false, now: this.now() });
+        applied = includeCompatibilityInCommit(applied, state);
+        if (applied.status !== 'committed') {
+            const result = { ...applied, status: `native_${applied.status}`, mode: 'NATIVE', state, displayText: extracted.prose, extracted, persisted: false, compatibility: compatibility.found };
+            this.diagnostics.warn('NATIVE_PATCH', `Hybrid Native patch was not committed: ${applied.status}`, { errors: applied.errors ?? [], messageIndex: index });
+            await cleanup(result);
+            return result;
+        }
+
+        try {
+            await this.store.save(applied.state, { expectedChatId: targetChatId });
+        } catch (error) {
+            if (error instanceof ChatSwitchError) this.diagnostics.warn('CHAT_SWITCH', error.message);
+            else this.diagnostics.error('PERSISTENCE', `Could not persist Hybrid Native state: ${error.message}`);
+            const failure = { status: 'persistence_error', mode: 'NATIVE', state, displayText: extracted.prose, extracted, error, persisted: false };
+            await cleanup(failure);
+            return failure;
+        }
+
+        const result = {
+            ...applied,
+            status: 'native_committed',
+            mode: 'NATIVE',
+            displayText: extracted.prose,
+            extracted,
+            compatibility: compatibility.found,
+            persisted: true,
+        };
+        this.diagnostics.info('NATIVE_COMMIT', `Hybrid Native committed ct ${result.state.ct}.`, { paths: result.diff?.forward?.map((change) => change.path) ?? [] });
+        await cleanup(result);
+        return result;
     }
 
     async _processShadowMessage(message, { index = -1, messageIdentity = '', expectedChatId = undefined, raw }) {
@@ -213,7 +352,7 @@ export class STStateEngine {
             const result = { status: 'ignored', reason: extracted.flashHandoff ? 'flash_handoff' : extracted.patch.mode.toLowerCase(), mode: 'SHADOW', state, persisted: false };
             this.diagnostics.info('PATCH_IGNORED', `Shadow ${result.reason} response did not mutate state`);
             if (extracted.controlBearing) {
-                recordControlMetadata(message, extracted, result, this.now());
+                recordControlMetadata(message, extracted, result, this.now(), { swipeIdentity: identity });
                 stripMessageControlPayload(message);
                 try { await this.adapter.saveChat?.({ expectedChatId: targetChatId }); } catch { /* display cleanup is best effort */ }
             }
@@ -224,7 +363,7 @@ export class STStateEngine {
         if (!importedResult.ok) {
             this.diagnostics.warn('SHADOW_LEGACY_MISSING', 'Shadow mode requires a usable <internal_states> block with a turn header; canonical state was kept unchanged.', { messageIndex: index });
             const result = { status: 'missing_legacy', mode: 'SHADOW', state, displayText: extracted.found ? extracted.prose : raw, extracted, persisted: false };
-            recordControlMetadata(message, extracted, result, this.now());
+            recordControlMetadata(message, extracted, result, this.now(), { swipeIdentity: identity });
             if (extracted.controlBearing) {
                 stripMessageControlPayload(message);
                 try { await this.adapter.saveChat?.({ expectedChatId: targetChatId }); } catch { /* rejection cleanup is best effort */ }
@@ -246,7 +385,7 @@ export class STStateEngine {
             };
             try { await this.store.saveShadowReport?.(sidecar, { expectedChatId: targetChatId }); } catch (error) { this.diagnostics.warn('SHADOW_REPORT', `Could not persist sequence diagnostic: ${error.message}`); }
             const mismatch = { status: 'legacy_sequence_mismatch', mode: 'SHADOW', state, displayText: extracted.found ? extracted.prose : raw, extracted, parity: sidecar, persisted: false };
-            recordControlMetadata(message, extracted, mismatch, this.now());
+            recordControlMetadata(message, extracted, mismatch, this.now(), { swipeIdentity: identity });
             if (extracted.controlBearing) {
                 stripMessageControlPayload(message);
                 try { await this.adapter.saveChat?.({ expectedChatId: targetChatId }); } catch { /* rejection cleanup is best effort */ }
@@ -302,7 +441,7 @@ export class STStateEngine {
             if (error instanceof ChatSwitchError) this.diagnostics.warn('CHAT_SWITCH', error.message);
             else this.diagnostics.error('PERSISTENCE', `Could not persist authoritative shadow import: ${error.message}`);
             const failure = { status: 'persistence_error', mode: 'SHADOW', state, displayText: extracted.prose, extracted, error, parity: sidecar, persisted: false };
-            recordControlMetadata(message, extracted, failure, this.now());
+            recordControlMetadata(message, extracted, failure, this.now(), { swipeIdentity: identity });
             stripMessageControlPayload(message);
             try { await this.adapter.saveChat?.({ expectedChatId: targetChatId }); } catch { /* preserve original diagnostic */ }
             return failure;
@@ -320,7 +459,7 @@ export class STStateEngine {
             displayText: extracted.prose,
             persisted,
         };
-        recordControlMetadata(message, extracted, shadowResult, this.now());
+        recordControlMetadata(message, extracted, shadowResult, this.now(), { swipeIdentity: identity });
         stripMessageControlPayload(message);
         try { await this.adapter.saveChat?.({ expectedChatId: targetChatId }); } catch (error) { this.diagnostics.warn('MESSAGE_SAVE', `Control payload removed for display but chat save failed: ${error.message}`); }
         return shadowResult;

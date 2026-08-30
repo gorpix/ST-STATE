@@ -1,8 +1,8 @@
-# ST-STATE v0.4.0-eval.3
+# ST-STATE v0.4.0-eval.4
 
 Browser-only, third-party [SillyTavern](https://docs.sillytavern.app/for-contributors/writing-extensions/) UI extension for ST-ENDGAME's durable state ledger and local in-world artifact renderer. It keeps canonical per-chat JSON in `chatMetadata.stState`, per-chat mode configuration in `chatMetadata.stStateConfig`, shadow parity in `chatMetadata.stStateShadow`, branch checkpoints in `chatMetadata.stStateBranches`, global preferences in `extensionSettings.stState`, and accepts the evaluative `ST_PATCH` and `ST_GFX` hidden line controls.
 
-This release is an evaluative Shadow build with presentation-only local GFX. `LEGACY` is the default and remains inert. `SHADOW` asks the model for a complete `<internal_states>` block, an `ST_PATCH`, and optional public `ST_GFX`; the imported legacy block remains authoritative while the patch is applied only to a disposable clone. `NATIVE` is present in the mode model but locked, and `RECOVERY` is read-only for incoming turns.
+This release adds opt-in **Hybrid Native** while retaining evaluative Shadow and presentation-only local GFX. `LEGACY` is the default and remains inert. `SHADOW` keeps the imported legacy block authoritative and evaluates its patch on a disposable clone. `NATIVE` makes actor, scene, ct, and numeric relationship patches authoritative; unsupported domains remain locally stored and use a partial compatibility fragment only when they change. `RECOVERY` is read-only for incoming turns.
 
 ## Integration roadmap
 
@@ -17,13 +17,14 @@ This release is an evaluative Shadow build with presentation-only local GFX. `LE
 - Versioned per-chat schema, migration, backup/restore preview, and tolerant importer/exporter for the current `<internal_states>` legacy format.
 - Explicit `LEGACY`, `SHADOW`, `NATIVE`, and `RECOVERY` modes with global default and per-chat override.
 - Shadow handshake, compact hot-state pack, strict dry-run patch validation, actor/scene/ct parity diagnostics, and an isolated `stStateShadow` sidecar.
-- Dormant Unified Local Frame projection for the future Native prompt. It folds each selected actor's placement, activity, thoughts, and emotional residue into one deterministic record while keeping canonical storage normalized; unmatched material is retained explicitly. It is not yet wired into Shadow injection.
+- Active Unified Local Frame projection for Shadow and Hybrid Native prompts. It folds each selected actor's placement, activity, thoughts, and emotional residue into one deterministic record while keeping canonical storage normalized; unmatched material is retained explicitly.
+- One injected d20 pre-roll per present NPC. The model must choose the attempted action and lock that actor's DC before consulting the roll; unused rolls expire after the response.
 - Per-assistant-slot checkpoints with released SillyTavern swipe/edit/delete event handling. Selecting or generating another swipe restores the common pre-response state before that branch becomes canonical.
 - Backup-gated **Rebaseline selected branch**, **Clear current chat state**, and **Restore previous state** controls. Candidate patches never enter canonical history.
 - Strict `ST_GFX V1` line parser and local text-only artifact renderer for phone, terminal, paper, map, notice, credential, transaction, web, broadcast, data, image, monitor, and media pop-ins. Phone artifacts include distinct iPhone-like and Android-like chat, notification, call, and email layouts.
 - Branch-bound GFX replay cache stored with the selected message swipe; swiping, editing, deleting, clearing, or changing chat replaces or clears abandoned overlays.
 
-Later mechanics (agenda, Chekhov, DND, clocks, knowledge, commitments, persistent artifact state, phone contact threads, and flash orchestration) are intentionally not implemented. Numeric Bonds/Sparks/Grudge reducers are already covered by Shadow parity.
+Later reducers (factions, residue, quests, inventory, Chekhov, thoughts, notebook, DND, World Sim, clocks, knowledge, commitments, persistent artifact state, phone contact threads, and flash orchestration) are intentionally not implemented. Numeric Bonds/Sparks/Grudge are supported, while directional relationship profiles remain compatibility-backed.
 
 ## Install
 
@@ -53,9 +54,15 @@ The manual **Import latest chat state** recovery action uses the same bounded co
 
 Each assistant message slot retains the complete canonical state from immediately before its response. Starting a new swipe restores that checkpoint before generation, so every alternative begins from the same `ct` and head. Selecting an existing completed swipe imports its usable legacy block against that checkpoint. Edit and delete events rebaseline or roll back the affected slot instead of leaving authority on an abandoned branch.
 
+## Hybrid Native protocol
+
+`NATIVE` is opt-in. On NORMAL turns the model emits visible prose plus one authoritative line-based `ST_PATCH`. Actors/NPC state, Scene & World, `ct`, and numeric Bond/Sparks/Grudge update locally and are never repeated as legacy rows. If an unsupported domain changes, the model may emit one partial `<internal_states>` compatibility fragment containing the next Turn header and only the changed unsupported sections; ST-STATE stages that fragment and the patch in one atomic commit, then strips both controls from chat. Unchanged unsupported domains remain in canonical local storage.
+
+Native swipe results retain a bounded post-response diff in the branch ledger. Selecting an existing Native swipe replays that diff from the common pre-response checkpoint; generating a new swipe restores the same checkpoint first.
+
 ## Local GFX protocol
 
-On a NORMAL turn that visibly presents an in-world visual medium, ST-ENDGAME emits at most one hidden `ST_GFX V1` line block after state controls. ST-STATE accepts only allowlisted media, public/visible content, bounded plain-text fields, and at most 16 rows. It strips complete, malformed, or dangling controls from the selected swipe and renders accepted artifacts with DOM element creation and `textContent`; model HTML, CSS, scripts, JSON, and external assets are never interpreted.
+On a transactional NORMAL turn that visibly presents an in-world visual medium, ST-ENDGAME emits at most one hidden `ST_GFX V1` line block after state controls. ST-STATE accepts only allowlisted media, public/visible content, bounded plain-text fields, and at most 16 rows. It strips complete, malformed, or dangling controls from the selected swipe and renders accepted artifacts with DOM element creation and `textContent`; model HTML, CSS, scripts, JSON, and external assets are never interpreted.
 
 The settings drawer can enable/disable Shadow pop-ins, choose a minimum duration, and preview every canonical artifact skin in any mode. Dedicated iPhone-like and Android-like buttons remain available for quick phone checks. The renderer extends the local minimum using a bounded visible-message reading-time estimate and caps automatic duration at 45 seconds. A model-supplied `duration` is parsed for transport compatibility but does not override that local timing policy. Parsed artifacts are presentation-only and never enter canonical state or Shadow parity.
 

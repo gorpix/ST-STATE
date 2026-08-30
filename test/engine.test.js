@@ -47,6 +47,70 @@ test('legacy mode does not process controls, while shadow prompt includes handsh
     assert.equal(context.injection[2], 1);
 });
 
+test('Hybrid Native commits an authoritative patch without a full legacy block', async () => {
+    const { context, engine, store } = setup();
+    setChatMode(context.chatMetadata, 'NATIVE');
+    const message = { is_user: false, mes: 'Alice speaks <!--ST_PATCH\nV2\nbase=GENESIS\nmode=NORMAL\ntx=native-1\nscene.set|openBeat|The door opens\n-->' };
+    const result = await engine.processAssistantMessage(message, { index: 0, messageIdentity: 'native-message' });
+    assert.equal(result.status, 'native_committed');
+    assert.equal(result.mode, 'NATIVE');
+    assert.equal(result.persisted, true);
+    assert.equal(store.load().ct, 1);
+    assert.equal(store.load().scene.openBeat, 'The door opens');
+    assert.equal(message.mes, 'Alice speaks ');
+    assert.equal(message.extra.stState.status, 'native_committed');
+    assert.equal(message.extra.stState.patch.tx, 'native-1');
+    assert.equal(context.chatMetadata.stStateShadow, undefined);
+});
+
+test('Hybrid Native merges only changed unsupported compatibility sections before its patch', async () => {
+    const { context, engine, store } = setup();
+    setChatMode(context.chatMetadata, 'NATIVE');
+    const compatibility = '<internal_states><details><summary>🎬 INTERNAL STATES (Turn: 1)</summary><details><summary>🏳️ FACTIONS</summary>- <b>Guild</b> | Goal: Secure the gate | Intel: Open | Fibs: None | State: Alert | Conflict: None | Relations: Neutral</details></details></internal_states>';
+    const message = { is_user: false, mes: `Visible prose ${compatibility} <!--ST_PATCH\nV2\nbase=GENESIS\nmode=NORMAL\ntx=native-compat\nscene.set|openBeat|The gate opens\n-->` };
+    const result = await engine.processAssistantMessage(message, { index: 0, messageIdentity: 'native-compat-message' });
+    assert.equal(result.status, 'native_committed');
+    assert.equal(result.compatibility, true);
+    assert.equal(store.load().scene.openBeat, 'The gate opens');
+    assert.equal(Object.values(store.load().factions)[0].goal, 'Secure the gate');
+    assert.doesNotMatch(message.mes, /internal_states|ST_PATCH|GFX_START|GFX_END/);
+    assert.ok(result.diff.forward.some((change) => change.path.startsWith('factions.')));
+});
+
+test('Hybrid Native rejects malformed and stale patches without changing canonical state', async () => {
+    for (const control of [
+        '<!--ST_PATCH\nV2\nbase=GENESIS\nmode=NORMAL\nunknown|bad\n-->',
+        '<!--ST_PATCH\nV2\nbase=wrong-head\nmode=NORMAL\ntx=stale\n-->',
+    ]) {
+        const { context, engine, store } = setup();
+        setChatMode(context.chatMetadata, 'NATIVE');
+        const before = store.load();
+        const message = { is_user: false, mes: `Visible ${control}` };
+        const result = await engine.processAssistantMessage(message, { index: 0, messageIdentity: `native-reject-${control.length}` });
+        assert.match(result.status, /^native_(malformed|stale)$/);
+        assert.deepEqual(store.load(), before);
+        assert.doesNotMatch(message.mes, /ST_PATCH/);
+    }
+});
+
+test('Hybrid Native freezes OOC, FLASH, and flash handoff', async () => {
+    for (const route of ['OOC', 'FLASH']) {
+        const { context, engine, store } = setup();
+        setChatMode(context.chatMetadata, 'NATIVE');
+        const before = store.load();
+        const message = { is_user: false, mes: `Visible <!--ST_PATCH\nV2\nbase=GENESIS\nmode=${route}\ntx=native-${route}\n-->` };
+        const result = await engine.processAssistantMessage(message, { index: 0, messageIdentity: `native-${route}` });
+        assert.equal(result.status, 'ignored');
+        assert.deepEqual(store.load(), before);
+    }
+    const { context, engine, store } = setup();
+    setChatMode(context.chatMetadata, 'NATIVE');
+    const before = store.load();
+    const result = await engine.processAssistantMessage({ is_user: false, mes: 'Visible <flash_handoff target="ST-FLASH" />' }, { index: 0, messageIdentity: 'native-handoff' });
+    assert.equal(result.status, 'ignored');
+    assert.deepEqual(store.load(), before);
+});
+
 test('capabilities recognize the registered generation interceptor before the first turn', () => {
     const previous = globalThis.stStateGenerateInterceptor;
     globalThis.stStateGenerateInterceptor = () => undefined;

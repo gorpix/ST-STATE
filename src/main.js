@@ -7,12 +7,13 @@ import { stableMessageIdentity } from './identity.js';
 import { extractHiddenPatch, messageText, removeControlPayload, stripMessageControlPayload } from './patch.js';
 import { CHAT_CONFIG_KEY, DEFAULT_ENGINE_MODE, ENGINE_MODES, SETTINGS_KEY, ensureGlobalSettings, getChatMode, getGlobalDefaultMode, normalizeEngineMode, setChatMode, setGlobalDefaultMode } from './modes.js';
 import { deepClone, stableHash } from './util.js';
-import { importLegacyState } from './legacy.js';
-import { BRANCH_SIDECAR_KEY, checkpointAssistantSlot, createBranchLedger, invalidateAssistantDelete, invalidateAssistantEdit, latestAssistantCheckpoint, prepareSwipeEvaluation, registerAssistantSwipe, restoreAssistantCheckpoint, stableSwipeIdentity } from './branch.js';
+import { importLegacyState, removeInternalStatesPayload, stripMessageInternalStatesPayload } from './legacy.js';
+import { BRANCH_SIDECAR_KEY, checkpointAssistantSlot, createBranchLedger, invalidateAssistantDelete, invalidateAssistantEdit, latestAssistantCheckpoint, prepareSwipeEvaluation, recordAssistantSwipeResult, registerAssistantSwipe, restoreAssistantCheckpoint, stableSwipeIdentity } from './branch.js';
 import { EXTENSION_KEY } from './schema.js';
 import { SHADOW_SIDECAR_KEY } from './modes.js';
 import { extractGfxProtocol, GFX_MEDIA_KINDS, removeGfxControl } from './gfx.js';
 import { createGfxOverlay } from './gfx-overlay.js';
+import { applyDiff } from './reducer.js';
 
 export const runtimeState = {
     adapter: null,
@@ -74,7 +75,7 @@ function branchOptions(adapter, message, index, swipeIndexOverride = undefined) 
     const slotId = branchSlotId(adapter, index);
     const swipeIndex = Number.isInteger(swipeIndexOverride) ? swipeIndexOverride : selectedSwipeIndex(message);
     const target = selectedSwipeTarget(message, swipeIndex);
-    const contentHash = stableHash(removeControlPayload(removeGfxControl(target.text)));
+    const contentHash = stableHash(removeInternalStatesPayload(removeControlPayload(removeGfxControl(target.text))));
     const providerSwipeId = message?.swipe_info?.[swipeIndex]?.send_date;
     return {
         slotId,
@@ -87,6 +88,10 @@ function branchOptions(adapter, message, index, swipeIndexOverride = undefined) 
         selectedText: target.text,
         at: Date.now(),
     };
+}
+
+function isTransactionalMode(mode) {
+    return mode === 'SHADOW' || mode === 'NATIVE';
 }
 
 const GFX_CACHE_KEY = 'stStateGfx';
@@ -194,15 +199,15 @@ async function guardedSaveChat(adapter, expectedChatId) {
 }
 
 function acceptsLocalGfx(result) {
-    return result?.mode === 'SHADOW'
-        && result?.persisted === true
-        && ['shadow_match', 'shadow_not_comparable', 'shadow_diverged'].includes(result?.status);
+    if (result?.persisted !== true) return false;
+    if (result?.mode === 'NATIVE') return result?.status === 'native_committed';
+    return result?.mode === 'SHADOW' && ['shadow_match', 'shadow_not_comparable', 'shadow_diverged'].includes(result?.status);
 }
 
 /** Parse, cache, strip, and locally render the selected message's visual artifact. */
 export async function renderLocalGfx(message, index, { expectedChatId = undefined } = {}) {
     const adapter = runtimeState.adapter;
-    if (!runtimeState.active || !adapter || runtimeState.engine?.getMode?.() !== 'SHADOW' || !isAssistantSlot(message)) return { status: 'ignored' };
+    if (!runtimeState.active || !adapter || !isTransactionalMode(runtimeState.engine?.getMode?.()) || !isAssistantSlot(message)) return { status: 'ignored' };
     const targetChatId = String(expectedChatId ?? adapter.getChatId?.() ?? '');
     if (!sameChat(adapter, targetChatId)) return { status: 'chat_changed' };
     const options = branchOptions(adapter, message, index);
@@ -337,7 +342,8 @@ export async function handleMessageReceived(data) {
     if (!isAssistantMessage(message)) return;
     const index = messageIndex(adapter, message, data);
     const chatId = adapter.getChatId();
-    const branchActive = engine.getMode?.() === 'SHADOW';
+    const activeMode = engine.getMode?.();
+    const branchActive = isTransactionalMode(activeMode);
     const options = branchActive ? branchOptions(adapter, message, index) : null;
     const identity = options?.swipeIdentity || stableMessageIdentity(message, index, chatId);
     const before = runtimeState.store?.load?.();
@@ -355,7 +361,15 @@ export async function handleMessageReceived(data) {
     const result = await engine.processAssistantMessage(message, { index, messageIdentity: identity, expectedChatId: chatId });
     if (branchActive && runtimeState.store?.loadBranchLedger && runtimeState.store?.saveBranchLedger) {
         try {
-            const selected = prepareSwipeEvaluation(runtimeState.store.loadBranchLedger(), options);
+            let selected = prepareSwipeEvaluation(runtimeState.store.loadBranchLedger(), options);
+            if (selected.ok && result.mode === 'NATIVE' && result.status === 'native_committed') {
+                selected = recordAssistantSwipeResult(selected.ledger, {
+                    ...options,
+                    mode: 'NATIVE',
+                    state: result.state,
+                    diff: result.diff?.forward ?? [],
+                });
+            }
             if (selected.ok) await runtimeState.store.saveBranchLedger(selected.ledger, { expectedChatId: chatId });
         } catch (error) {
             engine.diagnostics?.warn?.('BRANCH_SELECT', `Could not record the selected swipe: ${error.message}`);
@@ -409,8 +423,10 @@ async function cleanBranchControl(message, status, adapter, expectedChatId) {
     if (!sameChat(adapter, expectedChatId)) return false;
     const extracted = extractHiddenPatch(messageText(message));
     if (!extracted.controlBearing) return true;
-    recordControlMetadata(message, extracted, { status, mode: 'SHADOW' }, Date.now());
+    const mode = runtimeState.engine?.getMode?.() ?? 'SHADOW';
+    recordControlMetadata(message, extracted, { status, mode }, Date.now());
     stripMessageControlPayload(message);
+    if (mode === 'NATIVE') stripMessageInternalStatesPayload(message);
     try { return await guardedSaveChat(adapter, expectedChatId); }
     catch { return false; /* metadata authority is already safe */ }
 }
@@ -446,7 +462,8 @@ export async function handleMessageSwiped(data) {
     const adapter = runtimeState.adapter;
     const store = runtimeState.store;
     const engine = runtimeState.engine;
-    if (!runtimeState.active || !adapter || !store || !engine || engine.getMode?.() !== 'SHADOW') return { status: 'ignored' };
+    const activeMode = engine?.getMode?.();
+    if (!runtimeState.active || !adapter || !store || !engine || !isTransactionalMode(activeMode)) return { status: 'ignored' };
     const chatId = String(adapter.getChatId?.() ?? '');
     runtimeState.gfxOverlay?.clear?.();
     const index = eventMessageIndex(data);
@@ -468,30 +485,33 @@ export async function handleMessageSwiped(data) {
         engine.diagnostics?.info?.('BRANCH_AUTO_REBASELINE', `Rebuilt the selected branch checkpoint at ct ${fallback.ct}.`);
     }
     const checkpointState = selected.restoreState;
-    const imported = options.pendingSwipe ? { ok: false, diagnostics: ['Pending overswipe'] } : importLegacyState(options.selectedText, {
-        now: Date.now(),
-        baseState: checkpointState,
-        preserveMissingFromBase: true,
-        mergeSparseFromBase: true,
-        requireTurn: true,
-        userName: adapter.getUserName?.(),
-    });
+    const imported = activeMode === 'SHADOW' && !options.pendingSwipe ? importLegacyState(options.selectedText, {
+        now: Date.now(), baseState: checkpointState, preserveMissingFromBase: true, mergeSparseFromBase: true,
+        requireTurn: true, userName: adapter.getUserName?.(),
+    }) : { ok: false, diagnostics: [options.pendingSwipe ? 'Pending overswipe' : 'Native swipe uses its stored branch diff'] };
     let canonical = checkpointState;
     let status = 'branch_checkpoint';
     let source = 'branch-checkpoint';
-    if (imported.ok && imported.state.ct === checkpointState.ct + 1) {
+    if (activeMode === 'NATIVE' && !options.pendingSwipe && selected.swipe?.commitMode === 'NATIVE' && Array.isArray(selected.swipe.diff)) {
+        const replayed = applyDiff(checkpointState, selected.swipe.diff);
+        if (replayed.ct === selected.swipe.commitCt && replayed.head === selected.swipe.commitHead) {
+            canonical = replayed;
+            status = 'branch_selected';
+            source = 'selected-swipe-native';
+        }
+    } else if (imported.ok && imported.state.ct === checkpointState.ct + 1) {
         canonical = preserveCanonicalBookkeeping(imported.state, checkpointState);
         status = 'branch_selected';
         source = 'selected-swipe-legacy';
     }
-    const report = branchReport(status, canonical, {
+    const report = activeMode === 'SHADOW' ? branchReport(status, canonical, {
         ...options,
         previous: checkpointState,
         source,
         legacy: imported.ok
             ? { status: canonical === checkpointState ? 'sequence_mismatch' : 'accepted', ct: imported.state.ct, expectedCt: checkpointState.ct + 1 }
             : { status: 'pending_or_frozen', ct: checkpointState.ct },
-    });
+    }) : undefined;
     const persisted = await persistBranchCommit(canonical, selected.ledger, report, { adapter, store, engine, expectedChatId: chatId });
     if (!persisted) return { status: 'persistence_error', state: store.load(), checkpoint: checkpointState, imported: false, swipeIndex: options.swipeIndex };
     if (!options.pendingSwipe) await cleanBranchControl(message, status, adapter, chatId);
@@ -501,14 +521,15 @@ export async function handleMessageSwiped(data) {
     if (status === 'branch_selected' && sameChat(adapter, chatId)) await renderLocalGfx(message, index, { expectedChatId: chatId });
     refreshUI();
     runtimeState.chatTopology = snapshotChatTopology(adapter);
-    return { status, state: canonical, checkpoint: checkpointState, imported: imported.ok, swipeIndex: options.swipeIndex };
+    return { status, state: canonical, checkpoint: checkpointState, imported: imported.ok, replayed: source === 'selected-swipe-native', swipeIndex: options.swipeIndex };
 }
 
 export async function handleMessageEdited(data) {
     const adapter = runtimeState.adapter;
     const store = runtimeState.store;
     const engine = runtimeState.engine;
-    if (!runtimeState.active || !adapter || !store || !engine || engine.getMode?.() !== 'SHADOW') return { status: 'ignored' };
+    const activeMode = engine?.getMode?.();
+    if (!runtimeState.active || !adapter || !store || !engine || !isTransactionalMode(activeMode)) return { status: 'ignored' };
     const chatId = String(adapter.getChatId?.() ?? '');
     runtimeState.gfxOverlay?.clear?.();
     const index = eventMessageIndex(data);
@@ -526,7 +547,8 @@ export async function handleMessageEdited(data) {
             const result = invalidateAssistantEdit(ledger, { slotId: slot.slotId, messageId: slot.messageId, index: slot.index, at: Date.now(), reason: 'earlier_user_message_edited' });
             ledger = result.ledger;
         }
-        const persisted = await persistBranchCommit(restoreState, ledger, branchReport('user_edit_rollback', restoreState, { source: 'user-message-edit', previous: store.load() }), { adapter, store, engine, expectedChatId: chatId });
+        const report = activeMode === 'SHADOW' ? branchReport('user_edit_rollback', restoreState, { source: 'user-message-edit', previous: store.load() }) : undefined;
+        const persisted = await persistBranchCommit(restoreState, ledger, report, { adapter, store, engine, expectedChatId: chatId });
         runtimeState.chatTopology = snapshotChatTopology(adapter);
         runtimeState.gfxOverlay?.clear?.();
         if (persisted) adapter.notify?.('warning', 'ST-STATE rolled back responses after the edited user message. Regenerate from that point.');
@@ -536,13 +558,16 @@ export async function handleMessageEdited(data) {
     const options = branchOptions(adapter, message, index);
     const invalidated = invalidateAssistantEdit(store.loadBranchLedger({ initialize: false }), options);
     if (!invalidated.ok || !invalidated.restoreState) return { status: 'missing_checkpoint' };
-    const imported = importLegacyState(messageText(message), { now: Date.now(), baseState: invalidated.restoreState, preserveMissingFromBase: true, mergeSparseFromBase: true, requireTurn: true, userName: adapter.getUserName?.() });
+    const imported = activeMode === 'SHADOW'
+        ? importLegacyState(messageText(message), { now: Date.now(), baseState: invalidated.restoreState, preserveMissingFromBase: true, mergeSparseFromBase: true, requireTurn: true, userName: adapter.getUserName?.() })
+        : { ok: false };
     const canonical = imported.ok && imported.state.ct === invalidated.restoreState.ct + 1
         ? preserveCanonicalBookkeeping(imported.state, invalidated.restoreState)
         : invalidated.restoreState;
     const status = canonical === invalidated.restoreState ? 'edit_rollback' : 'edit_rebaseline';
     const replacement = checkpointAssistantSlot(invalidated.ledger, { ...options, state: invalidated.restoreState, replace: true });
-    const persisted = await persistBranchCommit(canonical, replacement.ledger, branchReport(status, canonical, { ...options, previous: invalidated.restoreState, source: status }), { adapter, store, engine, expectedChatId: chatId });
+    const report = activeMode === 'SHADOW' ? branchReport(status, canonical, { ...options, previous: invalidated.restoreState, source: status }) : undefined;
+    const persisted = await persistBranchCommit(canonical, replacement.ledger, report, { adapter, store, engine, expectedChatId: chatId });
     if (!persisted) return { status: 'persistence_error', state: store.load() };
     await cleanBranchControl(message, status, adapter, chatId);
     if (status === 'edit_rebaseline' && sameChat(adapter, chatId)) await renderLocalGfx(message, index, { expectedChatId: chatId });
@@ -555,7 +580,8 @@ export async function handleMessageDeleted(data) {
     const adapter = runtimeState.adapter;
     const store = runtimeState.store;
     const engine = runtimeState.engine;
-    if (!runtimeState.active || !adapter || !store || !engine || engine.getMode?.() !== 'SHADOW') return { status: 'ignored' };
+    const activeMode = engine?.getMode?.();
+    if (!runtimeState.active || !adapter || !store || !engine || !isTransactionalMode(activeMode)) return { status: 'ignored' };
     const chatId = String(adapter.getChatId?.() ?? '');
     runtimeState.gfxOverlay?.clear?.();
     const currentTopology = snapshotChatTopology(adapter);
@@ -568,7 +594,8 @@ export async function handleMessageDeleted(data) {
         const result = invalidateAssistantDelete(ledger, { slotId: slot.slotId, messageId: slot.messageId, index: slot.index, at: Date.now() });
         ledger = result.ledger;
     }
-    const persisted = await persistBranchCommit(restoreState, ledger, branchReport('delete_rollback', restoreState, { source: 'message-delete', previous: store.load() }), { adapter, store, engine, expectedChatId: chatId });
+    const report = activeMode === 'SHADOW' ? branchReport('delete_rollback', restoreState, { source: 'message-delete', previous: store.load() }) : undefined;
+    const persisted = await persistBranchCommit(restoreState, ledger, report, { adapter, store, engine, expectedChatId: chatId });
     runtimeState.chatTopology = currentTopology;
     runtimeState.gfxOverlay?.clear?.();
     if (!persisted) return { status: 'persistence_error', state: store.load() };
@@ -580,7 +607,7 @@ export async function handleMessageSwipeDeleted(data) {
     const adapter = runtimeState.adapter;
     const store = runtimeState.store;
     const engine = runtimeState.engine;
-    if (!runtimeState.active || !adapter || !store || !engine || engine.getMode?.() !== 'SHADOW') return { status: 'ignored' };
+    if (!runtimeState.active || !adapter || !store || !engine || !isTransactionalMode(engine.getMode?.())) return { status: 'ignored' };
     const chatId = String(adapter.getChatId?.() ?? '');
     runtimeState.gfxOverlay?.clear?.();
     const index = eventMessageIndex(data);
@@ -689,7 +716,7 @@ export async function prepareSwipeGenerationBaseline({ expectedChatId = undefine
     const adapter = runtimeState.adapter;
     const store = runtimeState.store;
     const engine = runtimeState.engine;
-    if (!adapter || !store || !engine || engine.getMode?.() !== 'SHADOW') return { status: 'ignored', verified: false };
+    if (!adapter || !store || !engine || !isTransactionalMode(engine.getMode?.())) return { status: 'ignored', verified: false };
     const chat = adapter.getChat?.() ?? [];
     let index = chat.length - 1;
     while (index >= 0 && !isAssistantSlot(chat[index])) index -= 1;
@@ -787,7 +814,7 @@ export async function setRuntimeMode(mode) {
     const metadata = adapter.getMetadata?.();
     const normalized = normalizeEngineMode(mode);
     const store = runtimeState.store ?? new ChatStore(adapter);
-    if (normalized === 'SHADOW') requireCurrentShadowBaseline(adapter, () => store.load({ initialize: false }), 'enabling Shadow mode');
+    if (normalized === 'SHADOW' || normalized === 'NATIVE') requireCurrentShadowBaseline(adapter, () => store.load({ initialize: false }), `enabling ${normalized === 'NATIVE' ? 'Hybrid Native' : 'Shadow'} mode`);
     const hadPrevious = Object.prototype.hasOwnProperty.call(metadata ?? {}, CHAT_CONFIG_KEY);
     const previous = hadPrevious ? deepClone(metadata[CHAT_CONFIG_KEY]) : undefined;
     const selected = setChatMode(metadata, mode, { now: Date.now() });
@@ -810,7 +837,7 @@ export async function setGlobalRuntimeMode(mode) {
     const settings = adapter.getSettings?.();
     const normalized = normalizeEngineMode(mode);
     const store = runtimeState.store ?? new ChatStore(adapter);
-    if (normalized === 'SHADOW') requireCurrentShadowBaseline(adapter, () => store.load({ initialize: false }), 'making Shadow the default');
+    if (normalized === 'SHADOW' || normalized === 'NATIVE') requireCurrentShadowBaseline(adapter, () => store.load({ initialize: false }), `making ${normalized === 'NATIVE' ? 'Hybrid Native' : 'Shadow'} the default`);
     const hadPrevious = Object.prototype.hasOwnProperty.call(settings ?? {}, SETTINGS_KEY);
     const previous = hadPrevious ? deepClone(settings[SETTINGS_KEY]) : undefined;
     const selected = setGlobalDefaultMode(settings, normalized);
@@ -922,20 +949,21 @@ export async function stStateGenerateInterceptor(chat, _contextSize, abort, type
     const latestUser = [...chatArray].reverse().find((message) => message?.is_user === true || message?.role === 'user');
     const generationType = String(type ?? 'normal').trim().toLowerCase();
     let verifiedBranchBaseline = false;
-    if (runtimeState.engine.getMode?.() === 'SHADOW') {
+    const activeMode = runtimeState.engine.getMode?.();
+    if (isTransactionalMode(activeMode)) {
         try {
             if (generationType === 'swipe') {
                 const prepared = await prepareSwipeGenerationBaseline({ expectedChatId: runtimeState.adapter?.getChatId?.() });
                 verifiedBranchBaseline = prepared.verified === true;
                 if (!verifiedBranchBaseline) {
-                    const message = 'Shadow swipe generation needs a reconstructable pre-response branch checkpoint.';
+                    const message = `${activeMode === 'NATIVE' ? 'Hybrid Native' : 'Shadow'} swipe generation needs a reconstructable pre-response branch checkpoint.`;
                     runtimeState.adapter?.clearPrompt?.();
                     runtimeState.engine.diagnostics?.warn?.('SWIPE_BASELINE_REQUIRED', message, prepared);
                     runtimeState.adapter?.notify?.('warning', `ST-STATE cancelled generation: ${message}`);
                     abort?.(true);
-                    return { injected: false, skipped: true, type: generationType, mode: 'SHADOW', reason: 'branch_checkpoint_required', branch: prepared };
+                    return { injected: false, skipped: true, type: generationType, mode: activeMode, reason: 'branch_checkpoint_required', branch: prepared };
                 }
-            } else {
+            } else if (activeMode === 'SHADOW') {
                 const baseline = inspectShadowBaseline(runtimeState.adapter, runtimeState.store?.load?.({ initialize: false }));
                 if (baseline.status === 'stale') {
                     await rebaselineSelectedBranch({ expectedChatId: runtimeState.adapter?.getChatId?.(), preserveBranchLedger: true, automatic: true });
@@ -946,7 +974,7 @@ export async function stStateGenerateInterceptor(chat, _contextSize, abort, type
             runtimeState.engine.diagnostics?.warn?.('AUTO_REBASELINE_FAILED', `Automatic branch rebaseline failed: ${error.message}`);
             runtimeState.adapter?.notify?.('warning', `ST-STATE cancelled generation: ${error.message}`);
             abort?.(true);
-            return { injected: false, skipped: true, type: generationType, mode: 'SHADOW', reason: 'automatic_rebaseline_failed', error };
+            return { injected: false, skipped: true, type: generationType, mode: activeMode, reason: 'automatic_rebaseline_failed', error };
         }
     }
     const result = await runtimeState.engine.injectPrompt(type, {

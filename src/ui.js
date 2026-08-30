@@ -335,7 +335,7 @@ export function mountSettingsUI({ host, store, getMode = () => 'LEGACY', setMode
     const modeLabel = element('label', 'st-mode-label', 'Chat mode');
     const mode = element('select', 'st-mode-select'); mode.setAttribute('aria-label', 'ST-STATE chat mode');
     for (const optionMode of ENGINE_MODES) {
-        const option = element('option', '', optionMode);
+        const option = element('option', '', optionMode === 'NATIVE' ? 'NATIVE (HYBRID)' : optionMode);
         option.value = optionMode;
         option.disabled = optionMode === 'NATIVE' && NATIVE_MODE_LOCKED;
         mode.append(option);
@@ -345,7 +345,7 @@ export function mountSettingsUI({ host, store, getMode = () => 'LEGACY', setMode
     const defaultModeLabel = element('label', 'st-mode-label', 'Default mode');
     const defaultMode = element('select', 'st-mode-select'); defaultMode.setAttribute('aria-label', 'ST-STATE global default mode');
     for (const optionMode of SELECTABLE_MODES) {
-        const option = element('option', '', optionMode); option.value = optionMode; defaultMode.append(option);
+        const option = element('option', '', optionMode === 'NATIVE' ? 'NATIVE (HYBRID)' : optionMode); option.value = optionMode; defaultMode.append(option);
     }
     defaultMode.value = getDefaultMode();
     defaultModeLabel.append(defaultMode);

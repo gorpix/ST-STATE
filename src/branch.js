@@ -74,6 +74,10 @@ function cleanSwipe(input, fallback = {}) {
         index,
         messageId: text(value.messageId || fallback.messageId),
         contentHash: text(value.contentHash || fallback.contentHash),
+        commitMode: value.commitMode === 'NATIVE' ? 'NATIVE' : '',
+        commitCt: Number.isInteger(value.commitCt) ? value.commitCt : null,
+        commitHead: text(value.commitHead),
+        diff: Array.isArray(value.diff) ? deepClone(value.diff).slice(0, 500) : [],
         status: value.status === 'invalidated' ? 'invalidated' : 'active',
         createdAt: Number.isFinite(value.createdAt) ? value.createdAt : fallback.createdAt,
         invalidatedAt: Number.isFinite(value.invalidatedAt) ? value.invalidatedAt : undefined,
@@ -271,6 +275,22 @@ export function registerAssistantSwipe(input, options = {}) {
     if (!slot) return { ledger, ok: false, reason: 'missing_slot', slotId };
     const swipe = ensureSwipe(slot, options, options.at);
     const event = recordEvent(ledger, slot, 'swipe', { swipeId: swipe.id, swipeIndex: swipe.index }, options.at);
+    return { ...checkpointResult(ledger, slot, swipe), ok: true, event };
+}
+
+/** Persist the bounded post-response diff required to replay a Native swipe. */
+export function recordAssistantSwipeResult(input, options = {}) {
+    const ledger = normalizeBranchLedger(input, options);
+    const slotId = slotIdFor(options);
+    const slot = ledger.slots[slotId];
+    if (!slot) return { ledger, ok: false, reason: 'missing_slot', slotId };
+    const swipe = ensureSwipe(slot, options, options.at);
+    swipe.commitMode = options.mode === 'NATIVE' ? 'NATIVE' : '';
+    swipe.commitCt = Number.isInteger(options.state?.ct) ? options.state.ct : null;
+    swipe.commitHead = text(options.state?.head);
+    swipe.diff = Array.isArray(options.diff) ? deepClone(options.diff).slice(0, 500) : [];
+    const event = recordEvent(ledger, slot, 'swipe_result', { swipeId: swipe.id, mode: swipe.commitMode, ct: swipe.commitCt }, options.at);
+    assertBranchLedgerSize(ledger);
     return { ...checkpointResult(ledger, slot, swipe), ok: true, event };
 }
 
