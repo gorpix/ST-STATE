@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.0-eval.12
+
+- Fixed the quick dashboard panel opener and verified the live launcher end to end.
+
+## 0.4.0-eval.11
+
+- Bound the dashboard button to the same persistent launcher lifecycle as the phone.
+- Added versioned browser assets so extension updates cannot retain stale modules or styles.
+
+## 0.4.0-eval.10
+
+- Made the dashboard launcher mount independently of the settings drawer.
+
 ## 0.4.0-eval.9
 
 - Added an always-available read-only dashboard launcher beside the phone button.

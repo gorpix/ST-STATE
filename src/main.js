@@ -12,7 +12,7 @@ import { BRANCH_SIDECAR_KEY, checkpointAssistantSlot, createBranchLedger, invali
 import { EXTENSION_KEY } from './schema.js';
 import { SHADOW_SIDECAR_KEY } from './modes.js';
 import { extractGfxProtocol, GFX_MEDIA_KINDS, removeGfxControl } from './gfx.js';
-import { createGfxOverlay } from './gfx-overlay.js';
+import { createGfxOverlay } from './gfx-overlay.js?v=0.4.0-eval.12';
 import { applyDiff } from './reducer.js';
 
 export const runtimeState = {
@@ -24,6 +24,7 @@ export const runtimeState = {
     bound: false,
     ui: null,
     gfxOverlay: null,
+    quickDashboard: null,
     chatTopology: [],
 };
 
@@ -134,11 +135,11 @@ function latestCachedPhoneEvent(adapter = runtimeState.adapter) {
 
 function ensureGfxOverlay() {
     if (runtimeState.gfxOverlay) {
-        runtimeState.gfxOverlay.configure?.(gfxOptions());
+        runtimeState.gfxOverlay.configure?.({ ...gfxOptions(), dashboardToggle: () => toggleQuickDashboard() });
         return runtimeState.gfxOverlay;
     }
     if (typeof document === 'undefined') return null;
-    runtimeState.gfxOverlay = createGfxOverlay(gfxOptions());
+    runtimeState.gfxOverlay = createGfxOverlay({ ...gfxOptions(), dashboardToggle: () => toggleQuickDashboard() });
     return runtimeState.gfxOverlay;
 }
 
@@ -153,8 +154,8 @@ function setQuickDashboardOpen(quick, open) {
 }
 
 function ensureQuickDashboard() {
-    if (typeof document === 'undefined' || !runtimeState.ui || !runtimeState.store) return null;
-    if (runtimeState.ui.quickDashboard?.launcher?.isConnected !== false) return runtimeState.ui.quickDashboard;
+    if (typeof document === 'undefined' || !runtimeState.store) return null;
+    if (runtimeState.quickDashboard && runtimeState.quickDashboard.launcher?.isConnected !== false) return runtimeState.quickDashboard;
     const parent = document.body ?? document.documentElement;
     if (!parent?.append) return null;
 
@@ -202,7 +203,7 @@ function ensureQuickDashboard() {
     const quick = { launcher, panel, content };
     launcher.onclick = () => setQuickDashboardOpen(quick, panel.hidden);
     if (close) close.onclick = () => setQuickDashboardOpen(quick, false);
-    runtimeState.ui.quickDashboard = quick;
+    runtimeState.quickDashboard = quick;
     return quick;
 }
 
@@ -395,16 +396,18 @@ function requireCurrentShadowBaseline(adapter, loadState, action) {
 }
 
 function refreshUI() {
-    if (!runtimeState.ui || !runtimeState.store) return;
+    if (!runtimeState.store) return;
     try {
-        const mode = runtimeState.ui.settingsRoot?.querySelector?.('[aria-label="ST-STATE chat mode"]');
-        const defaultMode = runtimeState.ui.settingsRoot?.querySelector?.('[aria-label="ST-STATE global default mode"]');
-        if (mode) mode.value = runtimeState.engine?.getMode?.() ?? DEFAULT_ENGINE_MODE;
-        if (defaultMode) defaultMode.value = getGlobalDefaultMode(runtimeState.adapter?.getSettings?.());
-        renderReadOnlyDashboard(runtimeState.ui.dashboard, runtimeState.store.load());
-        renderDiagnosticEvents(runtimeState.ui.diagnosticEvents, runtimeState.engine?.diagnostics?.list?.() ?? []);
-        renderShadowParity(runtimeState.ui.parity, runtimeState.store.getShadowReport?.());
-        const quick = runtimeState.ui.quickDashboard;
+        if (runtimeState.ui) {
+            const mode = runtimeState.ui.settingsRoot?.querySelector?.('[aria-label="ST-STATE chat mode"]');
+            const defaultMode = runtimeState.ui.settingsRoot?.querySelector?.('[aria-label="ST-STATE global default mode"]');
+            if (mode) mode.value = runtimeState.engine?.getMode?.() ?? DEFAULT_ENGINE_MODE;
+            if (defaultMode) defaultMode.value = getGlobalDefaultMode(runtimeState.adapter?.getSettings?.());
+            renderReadOnlyDashboard(runtimeState.ui.dashboard, runtimeState.store.load());
+            renderDiagnosticEvents(runtimeState.ui.diagnosticEvents, runtimeState.engine?.diagnostics?.list?.() ?? []);
+            renderShadowParity(runtimeState.ui.parity, runtimeState.store.getShadowReport?.());
+        }
+        const quick = runtimeState.quickDashboard;
         if (quick && !quick.panel.hidden) renderReadOnlyDashboard(quick.content, runtimeState.store.load());
     } catch { /* diagnostics panel owns host failures */ }
 }
@@ -878,7 +881,11 @@ export function initialize() {
     for (const [key, available] of Object.entries(capabilities)) if (!available && key !== 'stagingFormatterDetected') diagnostics.warn('CAPABILITY', `${key} is unavailable; affected features will remain safely disabled.`);
     bindEvents();
     if (typeof document !== 'undefined') {
-        const ready = () => mountUI();
+        const ready = () => {
+            mountUI();
+            ensureGfxOverlay();
+            ensureQuickDashboard();
+        };
         if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ready, { once: true });
         else setTimeout(ready, 0);
     }
@@ -1098,7 +1105,7 @@ export function onDisable() {
     runtimeState.active = false;
     runtimeState.adapter?.clearPrompt();
     runtimeState.gfxOverlay?.clear?.();
-    const quick = runtimeState.ui?.quickDashboard;
+    const quick = runtimeState.quickDashboard;
     if (quick) {
         setQuickDashboardOpen(quick, false);
         quick.launcher.hidden = true;

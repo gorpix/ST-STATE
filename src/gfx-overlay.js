@@ -9,6 +9,7 @@
 
 export const GFX_OVERLAY_ID = 'st-state-gfx-overlay';
 export const GFX_PHONE_LAUNCHER_ID = 'st-state-phone-launcher';
+export const GFX_DASHBOARD_LAUNCHER_ID = 'st-state-dashboard-launcher';
 export const DEFAULT_GFX_OVERLAY_OPTIONS = Object.freeze({
     enabled: true,
     reducedMotion: false,
@@ -246,6 +247,18 @@ function resolvePhoneLauncher(documentRef) {
     return { element: launcher, created: true };
 }
 
+function resolveDashboardLauncher(documentRef) {
+    if (!documentRef || typeof documentRef.createElement !== 'function') return { element: null, created: false };
+    const existing = documentRef.querySelector?.(`#${GFX_DASHBOARD_LAUNCHER_ID}`);
+    if (existing) return { element: existing, created: false };
+    const launcher = documentRef.createElement('button');
+    launcher.id = GFX_DASHBOARD_LAUNCHER_ID;
+    const parent = documentRef.body ?? documentRef.documentElement;
+    if (!parent || typeof parent.append !== 'function') return { element: null, created: false };
+    parent.append(launcher);
+    return { element: launcher, created: true };
+}
+
 function clonePresentationValue(value) {
     if (Array.isArray(value)) return value.map(clonePresentationValue);
     if (!value || typeof value !== 'object') return value;
@@ -277,14 +290,19 @@ export class GfxOverlay {
         this.sequence = 0;
         this.branchId = options.branchId === undefined ? null : text(options.branchId);
         this.phoneEventProvider = typeof options.phoneEventProvider === 'function' ? options.phoneEventProvider : null;
+        this.dashboardToggle = typeof options.dashboardToggle === 'function' ? options.dashboardToggle : null;
         this.latestPhoneEvent = null;
         this.preferredPhonePlatform = 'ios';
         this.ownsRoot = Boolean(this.root && this.root.id === GFX_OVERLAY_ID && !options.root && !options.container);
         const launcher = resolvePhoneLauncher(this.document);
         this.launcher = launcher.element;
         this.ownsLauncher = launcher.created;
+        const dashboardLauncher = resolveDashboardLauncher(this.document);
+        this.dashboardLauncher = dashboardLauncher.element;
+        this.ownsDashboardLauncher = dashboardLauncher.created;
         if (this.root) this.#prepareRoot();
         if (this.launcher) this.#prepareLauncher();
+        if (this.dashboardLauncher) this.#prepareDashboardLauncher();
     }
 
     #prepareRoot() {
@@ -316,8 +334,21 @@ export class GfxOverlay {
         this.launcher.setAttribute?.('title', open ? 'Close phone' : 'Open phone');
     }
 
+    #prepareDashboardLauncher() {
+        this.dashboardLauncher.className = 'st-state-dashboard-launcher';
+        this.dashboardLauncher.type = 'button';
+        this.dashboardLauncher.textContent = '📊';
+        this.dashboardLauncher.setAttribute?.('aria-controls', 'st-state-quick-dashboard');
+        this.dashboardLauncher.setAttribute?.('aria-expanded', 'false');
+        this.dashboardLauncher.setAttribute?.('aria-label', 'Open ST-STATE dashboard');
+        this.dashboardLauncher.setAttribute?.('title', 'Open ST-STATE dashboard');
+        this.dashboardLauncher.onclick = () => this.dashboardToggle?.();
+        this.dashboardLauncher.hidden = false;
+    }
+
     configure(options = {}) {
         if (typeof options.phoneEventProvider === 'function') this.phoneEventProvider = options.phoneEventProvider;
+        if (typeof options.dashboardToggle === 'function') this.dashboardToggle = options.dashboardToggle;
         const next = normaliseOptions({ ...this.options, ...options });
         this.options = next;
         if (this.root) {
@@ -473,8 +504,11 @@ export class GfxOverlay {
         if (this.ownsRoot) this.root?.remove?.();
         if (this.ownsLauncher) this.launcher?.remove?.();
         else if (this.launcher) this.launcher.onclick = null;
+        if (this.ownsDashboardLauncher) this.dashboardLauncher?.remove?.();
+        else if (this.dashboardLauncher) this.dashboardLauncher.onclick = null;
         this.root = null;
         this.launcher = null;
+        this.dashboardLauncher = null;
         return this;
     }
 }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { GFX_PHONE_LAUNCHER_ID, GfxOverlay, calculateGfxDuration, createGfxOverlay } from '../src/gfx-overlay.js';
+import { GFX_DASHBOARD_LAUNCHER_ID, GFX_PHONE_LAUNCHER_ID, GfxOverlay, calculateGfxDuration, createGfxOverlay } from '../src/gfx-overlay.js';
 import { GFX_MEDIA_KINDS, parseGfxProtocol } from '../src/gfx.js';
 
 class FakeClassList {
@@ -166,6 +166,21 @@ test('persistent phone launcher toggles and reopens the latest phone event', () 
     assert.equal(reopened.classList.contains('st-gfx-phone-android'), true);
     assert.match(reopened.textContent, /Still here\./);
     assert.equal(launcher.attributes['aria-pressed'], 'true');
+});
+
+test('dashboard launcher is created by the same persistent overlay lifecycle as the phone', () => {
+    const documentRef = documentFixture();
+    let toggles = 0;
+    const overlay = new GfxOverlay({ document: documentRef, dashboardToggle: () => { toggles += 1; } });
+    const phone = documentRef.querySelector(`#${GFX_PHONE_LAUNCHER_ID}`);
+    const dashboard = documentRef.querySelector(`#${GFX_DASHBOARD_LAUNCHER_ID}`);
+    assert.ok(phone);
+    assert.ok(dashboard);
+    assert.equal(dashboard.attributes['aria-label'], 'Open ST-STATE dashboard');
+    dashboard.onclick();
+    assert.equal(toggles, 1);
+    overlay.destroy();
+    assert.equal(documentRef.querySelector(`#${GFX_DASHBOARD_LAUNCHER_ID}`), null);
 });
 
 test('phone launcher uses the selected-chat provider and falls back to an empty shell', () => {

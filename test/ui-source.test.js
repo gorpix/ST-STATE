@@ -82,6 +82,9 @@ test('read-only dashboard has a persistent launcher beside the phone button', as
     assert.match(mainSource, /Open ST-STATE dashboard/);
     assert.match(mainSource, /toggleQuickDashboard/);
     assert.match(mainSource, /renderReadOnlyDashboard\(quick\.content/);
+    assert.match(mainSource, /const ready = \(\) => \{[\s\S]*ensureQuickDashboard\(\)/);
+    assert.match(mainSource, /runtimeState\.quickDashboard && runtimeState\.quickDashboard\.launcher/);
+    assert.doesNotMatch(mainSource, /if \(typeof document === 'undefined' \|\| !runtimeState\.ui \|\| !runtimeState\.store\) return null/);
     assert.match(cssSource, /\.st-state-dashboard-launcher[^}]*right:\s*4\.25rem/s);
     assert.match(cssSource, /\.st-state-quick-dashboard-panel/);
 });
