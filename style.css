@@ -151,11 +151,11 @@
 .st-state-quick-dashboard-panel .st-dashboard-header { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
 .st-state-quick-dashboard-panel .st-dashboard-header h3 { margin: 0; color: #94e2d5; }
 .st-state-quick-dashboard-panel .st-status-pill, .st-state-quick-dashboard-panel .st-actor-id { border-radius: 999px; color: #a6e3a1; background: rgba(166,227,161,.12); padding: .15rem .45rem; font-size: .78em; }
-.st-state-quick-dashboard-panel .st-dashboard-digest { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: .35rem; margin: .6rem 0; }
+.st-state-quick-dashboard-panel .st-dashboard-digest { display: grid; grid-template-columns: minmax(0, 1fr); gap: .35rem; margin: .6rem 0; }
 .st-state-quick-dashboard-panel .st-section { background: rgba(30,30,46,.52); border: 1px solid rgba(137,180,250,.2); border-radius: .4rem; margin: .4rem 0; overflow: hidden; }
 .st-state-quick-dashboard-panel .st-section-title { cursor: pointer; padding: .45rem .6rem; font-weight: 650; color: #89b4fa; background: linear-gradient(90deg, rgba(49,50,68,.84), transparent); }
 .st-state-quick-dashboard-panel .st-section > :not(summary) { padding: .55rem .6rem; }
-.st-state-quick-dashboard-panel .st-card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: .5rem; }
+.st-state-quick-dashboard-panel .st-card-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: .5rem; }
 .st-state-quick-dashboard-panel .st-actor-card, .st-state-quick-dashboard-panel .st-relation-card { background: linear-gradient(135deg, rgba(30,30,46,.94), rgba(17,24,39,.86)); border: 1px solid rgba(116,199,236,.24); border-left: 3px solid #74c7ec; border-radius: .45rem; padding: .55rem .65rem; }
 .st-state-quick-dashboard-panel .st-actor-card h4, .st-state-quick-dashboard-panel .st-relation-card h4 { margin: 0 0 .45rem; color: #cdd6f4; }
 .st-state-quick-dashboard-panel .st-kv { display: flex; gap: .45rem; line-height: 1.35; margin: .12rem 0; }

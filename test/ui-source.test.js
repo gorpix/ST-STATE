@@ -87,6 +87,8 @@ test('read-only dashboard has a persistent launcher beside the phone button', as
     assert.doesNotMatch(mainSource, /if \(typeof document === 'undefined' \|\| !runtimeState\.ui \|\| !runtimeState\.store\) return null/);
     assert.match(cssSource, /\.st-state-dashboard-launcher[^}]*right:\s*4\.25rem/s);
     assert.match(cssSource, /\.st-state-quick-dashboard-panel/);
+    assert.match(cssSource, /\.st-state-quick-dashboard-panel \.st-dashboard-digest \{[^}]*grid-template-columns: minmax\(0, 1fr\)/);
+    assert.match(cssSource, /\.st-state-quick-dashboard-panel \.st-card-grid \{[^}]*grid-template-columns: minmax\(0, 1fr\)/);
 });
 
 test('runtime refresh synchronizes mode selectors after chat metadata changes', async () => {

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.0-eval.13
+
+- Kept the quick dashboard in a single-column layout at every screen width.
+
 ## 0.4.0-eval.12
 
 - Fixed the quick dashboard panel opener and verified the live launcher end to end.
