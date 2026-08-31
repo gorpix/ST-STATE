@@ -9,7 +9,7 @@ Browser-only SillyTavern extension for per-chat state, Shadow parity, evaluative
 - `NATIVE` — commits validated actor, scene, turn, and numeric Bond/Sparks/Grudge updates locally.
 - `RECOVERY` — read-only incoming-turn mode.
 
-Native is opt-in and evaluative. Factions, residue, quests, inventory, Chekhov, thoughts, notebook, DND, World Sim, clocks, knowledge, commitments, and persistent artifact state remain compatibility-backed.
+Native is opt-in and evaluative. Actors, actor thoughts, scene, and numeric relationships are native. Factions, residue, quests, inventory, Chekhov, notebook, DND, World Sim, clocks, knowledge, commitments, and persistent artifact state remain compatibility-backed.
 
 The extension also provides a unified local frame, automatic first-turn identity bootstrap, one injected d20 per present NPC, branch checkpoints for swipes/edits/deletes, and a text-only `ST_GFX V1` renderer. Bootstrap adds identity records only; scene and mechanics changes require a validated transaction.
 

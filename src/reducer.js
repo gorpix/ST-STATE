@@ -67,16 +67,36 @@ export function applyDiff(state, changes) {
 
 function applyOperations(state, operations) {
     const result = deepClone(state);
+    const setActorThoughts = (id, value) => {
+        const actor = result.actors[id] ?? {};
+        const aliases = new Set([id, actor.name, actor.displayName].filter(Boolean).map((item) => String(item).trim().toLowerCase()));
+        result.thoughts = (result.thoughts ?? []).filter((item) => {
+            const owner = typeof item === 'string' ? '' : String(item?.actor ?? item?.name ?? item?.subject ?? item?.id ?? '').trim().toLowerCase();
+            return !aliases.has(owner);
+        });
+        const values = Array.isArray(value) ? value : [value];
+        for (const thought of values) {
+            const text = String(thought ?? '').trim();
+            if (text && !/^none$/i.test(text)) result.thoughts.push({ actor: id, thoughts: text });
+        }
+    };
     for (const operation of operations) {
         if (operation.op === 'actor.set') {
             const actor = result.actors[operation.id];
             // Validation guarantees this exists. Keep this guard so a malformed
             // caller cannot turn a missing actor into an arbitrary object path.
             if (!isPlainObject(actor)) throw new Error(`Actor ${operation.id} does not exist`);
-            for (const [field, value] of Object.entries(operation.set)) actor[field] = deepClone(value);
+            for (const [field, value] of Object.entries(operation.set)) {
+                if (field === 'thoughts') setActorThoughts(operation.id, value);
+                else actor[field] = deepClone(value);
+            }
         } else if (operation.op === 'actor.create') {
             if (hasOwn(result.actors, operation.id)) throw new Error(`Actor ${operation.id} already exists`);
-            result.actors[operation.id] = { id: operation.id, ...deepClone(operation.actor) };
+            const actor = deepClone(operation.actor);
+            const thoughts = actor.thoughts;
+            delete actor.thoughts;
+            result.actors[operation.id] = { id: operation.id, ...actor };
+            if (thoughts !== undefined) setActorThoughts(operation.id, thoughts);
         } else if (operation.op === 'scene.set') {
             for (const [field, value] of Object.entries(operation.set)) result.scene[field] = deepClone(value);
         } else if (operation.op === 'relation.set') {

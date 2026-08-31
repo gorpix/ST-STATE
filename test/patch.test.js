@@ -39,6 +39,16 @@ test('parses and groups line-based relationship updates', () => {
     assert.deepEqual(result.patch.ops, [{ op: 'relation.set', a: 'US', b: 'AL', set: { bond: 4, sparks: 2, grudge: 1 } }]);
 });
 
+test('accepts legacy ct metadata without turning it into a state operation', () => {
+    for (const ctLine of ['ct|3', 'ct=3']) {
+        const text = `<!--ST_PATCH\nV2\nbase=h-2\nmode=NORMAL\n${ctLine}\nactor.set|AL|thoughts|Keep the door in view\n-->`;
+        const result = extractHiddenPatch(text);
+        assert.equal(result.ok, true);
+        assert.equal(result.patch.ct, 3);
+        assert.deepEqual(result.patch.ops, [{ op: 'actor.set', id: 'AL', set: { thoughts: 'Keep the door in view' } }]);
+    }
+});
+
 test('flash handoff freezes and is removed from display', () => {
     assert.equal(hasFlashHandoff('ordinary <flash_handoff reason="zoom"/> prose'), true);
     assert.equal(removeControlPayload('ordinary <flash_handoff reason="zoom"/> prose'), 'ordinary  prose');

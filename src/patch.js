@@ -33,11 +33,22 @@ function parseLinePatch(candidate) {
             const key = line.slice(0, equals).trim();
             const value = line.slice(equals + 1).trim();
             if (key === 'base' || key === 'mode' || key === 'tx') patch[key] = value;
+            else if (key === 'ct') {
+                const claimedCt = Number(value);
+                if (!Number.isInteger(claimedCt) || claimedCt < 0) throw new Error(`Malformed ST_PATCH header: ${line}`);
+                patch.ct = claimedCt;
+            }
             else throw new Error(`Unknown ST_PATCH header: ${key}`);
             continue;
         }
         const parts = line.split('|');
         const operation = parts[0];
+        if (operation === 'ct') {
+            const claimedCt = Number(parts[1]?.trim());
+            if (parts.length !== 2 || !Number.isInteger(claimedCt) || claimedCt < 0) throw new Error(`Malformed ST_PATCH line: ${line}`);
+            patch.ct = claimedCt;
+            continue;
+        }
         if (operation === 'actor.set' || operation === 'actor.create') {
             if (parts.length < 4) throw new Error(`Malformed ST_PATCH line: ${line}`);
             const id = parts[1].trim();

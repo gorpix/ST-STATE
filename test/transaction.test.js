@@ -96,6 +96,34 @@ test('bootstrap actor.create is idempotent and legacy fullname maps to displayNa
     assert.equal(committed.state.actors.NS.displayName, 'Nicholas Snickerson');
 });
 
+test('legacy actor thoughts update the canonical thoughts collection and ct metadata stays advisory', () => {
+    const before = state();
+    before.ct = 2;
+    before.meta.ct = 2;
+    before.thoughts = [
+        { actor: 'Alice', thoughts: 'Old thought' },
+        { actor: 'US', thoughts: 'User thought remains' },
+    ];
+    const patch = { version: 2, base: before.head, mode: 'NORMAL', ct: 99, tx: 'legacy-thoughts', ops: [
+        { op: 'actor.set', id: 'AL', set: { thoughts: 'Keep the door in view', doing: 'watching' } },
+    ] };
+
+    const validated = validatePatchEnvelope(patch, { state: before });
+    assert.equal(validated.ok, true);
+    assert.equal(Object.hasOwn(validated.value, 'ct'), false);
+    assert.deepEqual(validated.value.ops[0].set, { thoughts: 'Keep the door in view', doing: 'watching' });
+
+    const committed = applyTransaction(before, patch, { messageIdentity: 'legacy-thoughts-message', now: 2 });
+    assert.equal(committed.status, 'committed');
+    assert.equal(committed.state.ct, 3);
+    assert.equal(committed.state.actors.AL.doing, 'watching');
+    assert.deepEqual(committed.state.thoughts, [
+        { actor: 'US', thoughts: 'User thought remains' },
+        { actor: 'AL', thoughts: 'Keep the door in view' },
+    ]);
+    assert.equal(Object.hasOwn(committed.state.actors.AL, 'thoughts'), false);
+});
+
 test('legacy vad compatibility remains strict and unambiguous', () => {
     const before = state();
     for (const vad of ['+2/+1', '+2/hot/-1', '+3/+1/-1', '+2/+1,-1']) {

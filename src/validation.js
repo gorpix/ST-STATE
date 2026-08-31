@@ -15,7 +15,7 @@ export class PatchValidationError extends Error {
     }
 }
 
-const ENVELOPE_KEYS = new Set(['version', 'base', 'head', 'mode', 'ops', 'tx', 'id', 'transactionId', 'messageId']);
+const ENVELOPE_KEYS = new Set(['version', 'base', 'head', 'mode', 'ops', 'ct', 'tx', 'id', 'transactionId', 'messageId']);
 const ACTOR_OP_KEYS = new Set(['op', 'id', 'field', 'value', 'set', 'fields']);
 const CREATE_OP_KEYS = new Set(['op', 'id', 'actor', 'set', 'fields']);
 const SCENE_OP_KEYS = new Set(['op', 'field', 'value', 'set', 'fields']);
@@ -57,6 +57,8 @@ const normalizeFieldTerm = (field) => typeof field === 'string' ? field.trim().t
 const ACTOR_FIELD_ALIASES = new Map(ALLOWLISTED_ACTOR_FIELDS.map((field) => [normalizeFieldTerm(field), field]));
 const SCENE_FIELD_ALIASES = new Map(ALLOWLISTED_SCENE_FIELDS.map((field) => [normalizeFieldTerm(field), field]));
 ACTOR_FIELD_ALIASES.set('fullname', 'displayName');
+ACTOR_FIELD_ALIASES.set('thoughts', 'thoughts');
+ACTOR_FIELD_ALIASES.set('internalthoughts', 'thoughts');
 SCENE_FIELD_ALIASES.set('env', 'environment');
 
 function isLegacyVadField(field) {
@@ -126,6 +128,10 @@ function assignActorField(fields, field, value, path, errors) {
 }
 
 function normalizeActorField(field, value, path, errors) {
+    if (field === 'thoughts') {
+        if (Array.isArray(value)) return validateTextList(value, path, errors, { maxItems: 8, maxLength: 2000 });
+        return validateText(value, path, errors, { maxLength: 2000 });
+    }
     if (!ALLOWLISTED_ACTOR_FIELDS.includes(field)) {
         fail(errors, path, `field "${field}" is not allowlisted`);
         return undefined;
@@ -360,6 +366,10 @@ export function validatePatchEnvelope(input, { state = null } = {}) {
     checkKeys(patch, ENVELOPE_KEYS, '$', errors);
     if (![1, SCHEMA_VERSION].includes(patch.version)) fail(errors, '$.version', `must equal 1 or ${SCHEMA_VERSION}`);
     const base = validateText(patch.base, '$.base', errors, { allowEmpty: false, maxLength: 200 });
+    if (hasOwn(patch, 'ct')) {
+        const claimedCt = typeof patch.ct === 'number' ? patch.ct : (/^\d+$/.test(String(patch.ct).trim()) ? Number(patch.ct) : Number.NaN);
+        if (!Number.isSafeInteger(claimedCt) || claimedCt < 0) fail(errors, '$.ct', 'must be a non-negative integer when supplied');
+    }
     if (!PATCH_MODES.includes(patch.mode)) fail(errors, '$.mode', 'must be NORMAL, OOC, or FLASH');
     if (!Array.isArray(patch.ops)) fail(errors, '$.ops', 'must be an array');
     if (Array.isArray(patch.ops) && patch.ops.length > MAX_PATCH_OPS) fail(errors, '$.ops', `must contain at most ${MAX_PATCH_OPS} operations`);

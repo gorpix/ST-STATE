@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.0-eval.14
+
+- Accepted advisory legacy `ct` patch lines and routed actor `thoughts` into canonical Native state.
+
 ## 0.4.0-eval.13
 
 - Kept the quick dashboard in a single-column layout at every screen width.
