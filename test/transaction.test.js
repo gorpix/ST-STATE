@@ -74,6 +74,28 @@ test('all supported legacy actor and scene labels normalize to canonical fields'
     assert.deepEqual(legacyPositions.value.ops[0].set.positions, { US: 'beside Alice', AL: 'at the window' });
 });
 
+test('bootstrap actor.create is idempotent and legacy fullname maps to displayName', () => {
+    const before = state();
+    before.actors.NS = { id: 'NS', name: 'Nicholas Snickerson' };
+    const patch = { version: 2, base: before.head, mode: 'NORMAL', tx: 'bootstrap-upsert', ops: [
+        { op: 'actor.create', id: 'NS', actor: { name: 'Nick', fullname: 'Nicholas Snickerson', at: 'his bed', vad: '1,1,1' } },
+    ] };
+
+    const validated = validatePatchEnvelope(patch, { state: before });
+    assert.equal(validated.ok, true);
+    assert.deepEqual(validated.value.ops[0], {
+        op: 'actor.set',
+        id: 'NS',
+        set: { name: 'Nick', displayName: 'Nicholas Snickerson', at: 'his bed', valence: 1, arousal: 1, dominance: 1 },
+    });
+
+    const committed = applyTransaction(before, patch, { messageIdentity: 'bootstrap-upsert-message', now: 2 });
+    assert.equal(committed.status, 'committed');
+    assert.equal(committed.state.ct, 1);
+    assert.equal(committed.state.actors.NS.name, 'Nick');
+    assert.equal(committed.state.actors.NS.displayName, 'Nicholas Snickerson');
+});
+
 test('legacy vad compatibility remains strict and unambiguous', () => {
     const before = state();
     for (const vad of ['+2/+1', '+2/hot/-1', '+3/+1/-1', '+2/+1,-1']) {

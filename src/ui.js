@@ -225,9 +225,11 @@ export function renderDiagnosticEvents(container, entries = []) {
     for (const entry of events) {
         const row = element('div', `st-diagnostic-event st-${entry.level || 'info'}`);
         const when = Number.isFinite(entry.at) ? new Date(entry.at).toLocaleTimeString() : '';
+        const errors = Array.isArray(entry.details?.errors) ? entry.details.errors.filter(Boolean).join('; ') : '';
+        const message = errors ? `${entry.message || ''} ${errors}`.trim() : (entry.message || '');
         row.append(
             element('strong', 'st-diagnostic-code', entry.code || 'ST-STATE'),
-            element('span', 'st-diagnostic-message', entry.message || ''),
+            element('span', 'st-diagnostic-message', message),
             element('time', 'st-diagnostic-time', when),
         );
         container.append(row);

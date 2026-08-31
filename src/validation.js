@@ -56,6 +56,7 @@ const VAD_COMPONENT_FIELDS = Object.freeze(['valence', 'arousal', 'dominance']);
 const normalizeFieldTerm = (field) => typeof field === 'string' ? field.trim().toLowerCase().replace(/[\s_-]+/g, '') : '';
 const ACTOR_FIELD_ALIASES = new Map(ALLOWLISTED_ACTOR_FIELDS.map((field) => [normalizeFieldTerm(field), field]));
 const SCENE_FIELD_ALIASES = new Map(ALLOWLISTED_SCENE_FIELDS.map((field) => [normalizeFieldTerm(field), field]));
+ACTOR_FIELD_ALIASES.set('fullname', 'displayName');
 SCENE_FIELD_ALIASES.set('env', 'environment');
 
 function isLegacyVadField(field) {
@@ -284,7 +285,7 @@ function normalizeOperation(operation, index, knownActors, errors, state = null)
         checkKeys(operation, CREATE_OP_KEYS, path, errors);
         if (hasOwn(operation, 'actor') && (hasOwn(operation, 'set') || hasOwn(operation, 'fields'))) fail(errors, path, 'use either actor or set/fields, not both');
         if (!isValidActorId(operation.id) || operation.id === 'US') fail(errors, `${path}.id`, 'must be a stable two-letter uppercase ID other than US');
-        if (isValidActorId(operation.id) && knownActors.has(operation.id)) fail(errors, `${path}.id`, 'actor ID already exists');
+        const actorAlreadyExists = isValidActorId(operation.id) && knownActors.has(operation.id);
         const actorInput = operation.actor ?? operation.set ?? operation.fields;
         if (!isPlainObject(actorInput)) fail(errors, `${path}.actor`, 'must be an object');
         const actor = {};
@@ -299,9 +300,14 @@ function normalizeOperation(operation, index, knownActors, errors, state = null)
                 if (hasLegacyVad && VAD_COMPONENT_FIELDS.includes(entry.canonical)) continue;
                 assignActorField(actor, entry.field, entry.value, `${path}.actor.${entry.field}`, errors);
             }
-            if (!hasOwn(actor, 'name') || !actor.name) fail(errors, `${path}.actor.name`, 'is required');
+            if (!actorAlreadyExists && (!hasOwn(actor, 'name') || !actor.name)) fail(errors, `${path}.actor.name`, 'is required');
         }
         if (isValidActorId(operation.id) && operation.id !== 'US') knownActors.add(operation.id);
+        // First-turn bootstrap creates identity-only actor rows before the model
+        // sees the local frame. Older prompt habits may still emit actor.create
+        // for that row; treating it as an upsert keeps the transaction atomic
+        // without allowing arbitrary IDs or fields.
+        if (actorAlreadyExists) return { op: 'actor.set', id: operation.id, set: actor };
         return { op: operation.op, id: operation.id, actor };
     }
     if (operation.op === 'scene.set') {
