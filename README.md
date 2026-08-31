@@ -15,8 +15,8 @@ The extension also provides a unified local frame, automatic first-turn identity
 
 ## Install
 
-1. Copy or clone this directory to `data/<user>/extensions/ST-STATE`.
-2. Enable **ST-STATE** in SillyTavern.
+1. Open SillyTavern's extensions panel and choose **Install extension**.
+2. Enter `https://github.com/gorpix/ST-STATE`, install it, and enable the extension.
 3. Select a per-chat mode in the extension drawer.
 
 The extension uses browser ES modules and released SillyTavern APIs. No server plugin or bundler is required.
