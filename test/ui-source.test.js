@@ -75,6 +75,17 @@ test('local GFX exposes a persistent accessible phone launcher', async () => {
     assert.match(cssSource, /\.st-gfx-phone-launcher/);
 });
 
+test('read-only dashboard has a persistent launcher beside the phone button', async () => {
+    const mainSource = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
+    const cssSource = await readFile(new URL('../style.css', import.meta.url), 'utf8');
+    assert.match(mainSource, /QUICK_DASHBOARD_LAUNCHER_ID/);
+    assert.match(mainSource, /Open ST-STATE dashboard/);
+    assert.match(mainSource, /toggleQuickDashboard/);
+    assert.match(mainSource, /renderReadOnlyDashboard\(quick\.content/);
+    assert.match(cssSource, /\.st-state-dashboard-launcher[^}]*right:\s*4\.25rem/s);
+    assert.match(cssSource, /\.st-state-quick-dashboard-panel/);
+});
+
 test('runtime refresh synchronizes mode selectors after chat metadata changes', async () => {
     const source = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
     assert.match(source, /querySelector\?\.\('\[aria-label="ST-STATE chat mode"\]'\)/);

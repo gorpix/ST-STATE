@@ -27,6 +27,9 @@ export const runtimeState = {
     chatTopology: [],
 };
 
+export const QUICK_DASHBOARD_LAUNCHER_ID = 'st-state-dashboard-launcher';
+export const QUICK_DASHBOARD_PANEL_ID = 'st-state-quick-dashboard';
+
 function eventName(adapter, name) {
     return adapter.eventType(name);
 }
@@ -137,6 +140,77 @@ function ensureGfxOverlay() {
     if (typeof document === 'undefined') return null;
     runtimeState.gfxOverlay = createGfxOverlay(gfxOptions());
     return runtimeState.gfxOverlay;
+}
+
+function setQuickDashboardOpen(quick, open) {
+    if (!quick) return false;
+    quick.panel.hidden = !open;
+    quick.launcher.setAttribute?.('aria-expanded', open ? 'true' : 'false');
+    quick.launcher.setAttribute?.('aria-label', open ? 'Close ST-STATE dashboard' : 'Open ST-STATE dashboard');
+    quick.launcher.setAttribute?.('title', open ? 'Close ST-STATE dashboard' : 'Open ST-STATE dashboard');
+    if (open && runtimeState.store) renderReadOnlyDashboard(quick.content, runtimeState.store.load());
+    return open;
+}
+
+function ensureQuickDashboard() {
+    if (typeof document === 'undefined' || !runtimeState.ui || !runtimeState.store) return null;
+    if (runtimeState.ui.quickDashboard?.launcher?.isConnected !== false) return runtimeState.ui.quickDashboard;
+    const parent = document.body ?? document.documentElement;
+    if (!parent?.append) return null;
+
+    let launcher = document.querySelector?.(`#${QUICK_DASHBOARD_LAUNCHER_ID}`);
+    if (!launcher) {
+        launcher = document.createElement('button');
+        launcher.id = QUICK_DASHBOARD_LAUNCHER_ID;
+        parent.append(launcher);
+    }
+    launcher.className = 'st-state-dashboard-launcher';
+    launcher.type = 'button';
+    launcher.textContent = '📊';
+    launcher.setAttribute?.('aria-controls', QUICK_DASHBOARD_PANEL_ID);
+    launcher.setAttribute?.('aria-expanded', 'false');
+    launcher.setAttribute?.('aria-label', 'Open ST-STATE dashboard');
+    launcher.setAttribute?.('title', 'Open ST-STATE dashboard');
+    launcher.hidden = !runtimeState.active;
+
+    let panel = document.querySelector?.(`#${QUICK_DASHBOARD_PANEL_ID}`);
+    if (!panel) {
+        panel = document.createElement('section');
+        panel.id = QUICK_DASHBOARD_PANEL_ID;
+        panel.className = 'st-state-quick-dashboard-panel';
+        panel.setAttribute?.('role', 'dialog');
+        panel.setAttribute?.('aria-label', 'ST-STATE dashboard');
+        panel.hidden = true;
+        const bar = document.createElement('div');
+        bar.className = 'st-state-quick-dashboard-bar';
+        const title = document.createElement('strong');
+        title.textContent = 'State dashboard';
+        const close = document.createElement('button');
+        close.className = 'st-state-quick-dashboard-close';
+        close.type = 'button';
+        close.textContent = '×';
+        close.setAttribute?.('aria-label', 'Close ST-STATE dashboard');
+        const content = document.createElement('div');
+        content.className = 'st-state-quick-dashboard-content';
+        bar.append(title, close);
+        panel.append(bar, content);
+        parent.append(panel);
+    }
+    const content = panel.querySelector?.('.st-state-quick-dashboard-content');
+    const close = panel.querySelector?.('.st-state-quick-dashboard-close');
+    if (!content) return null;
+    const quick = { launcher, panel, content };
+    launcher.onclick = () => setQuickDashboardOpen(quick, panel.hidden);
+    if (close) close.onclick = () => setQuickDashboardOpen(quick, false);
+    runtimeState.ui.quickDashboard = quick;
+    return quick;
+}
+
+export function toggleQuickDashboard(force = undefined) {
+    const quick = ensureQuickDashboard();
+    if (!quick) return false;
+    const open = typeof force === 'boolean' ? force : quick.panel.hidden;
+    return setQuickDashboardOpen(quick, open);
 }
 
 function gfxCache(message, { initialize = false } = {}) {
@@ -330,6 +404,8 @@ function refreshUI() {
         renderReadOnlyDashboard(runtimeState.ui.dashboard, runtimeState.store.load());
         renderDiagnosticEvents(runtimeState.ui.diagnosticEvents, runtimeState.engine?.diagnostics?.list?.() ?? []);
         renderShadowParity(runtimeState.ui.parity, runtimeState.store.getShadowReport?.());
+        const quick = runtimeState.ui.quickDashboard;
+        if (quick && !quick.panel.hidden) renderReadOnlyDashboard(quick.content, runtimeState.store.load());
     } catch { /* diagnostics panel owns host failures */ }
 }
 
@@ -688,6 +764,7 @@ function mountUI() {
         renderReadOnlyDashboard(runtimeState.ui.dashboard, runtimeState.store.load());
     }
     ensureGfxOverlay();
+    ensureQuickDashboard();
 }
 
 export async function rebaselineSelectedBranch({ expectedChatId = undefined, preserveBranchLedger = false, automatic = false } = {}) {
@@ -1014,10 +1091,17 @@ export function onEnable() {
     runtimeState.active = true;
     if (!runtimeState.engine) initialize();
     ensureGfxOverlay();
+    const quick = ensureQuickDashboard();
+    if (quick?.launcher) quick.launcher.hidden = false;
 }
 export function onDisable() {
     runtimeState.active = false;
     runtimeState.adapter?.clearPrompt();
     runtimeState.gfxOverlay?.clear?.();
+    const quick = runtimeState.ui?.quickDashboard;
+    if (quick) {
+        setQuickDashboardOpen(quick, false);
+        quick.launcher.hidden = true;
+    }
 }
 

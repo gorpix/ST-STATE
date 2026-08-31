@@ -1,4 +1,4 @@
-# ST-STATE v0.4.0-eval.8
+# ST-STATE v0.4.0-eval.9
 
 Browser-only SillyTavern extension for per-chat state, Shadow parity, evaluative Hybrid Native updates, branch-safe swipes, and local Pop-In GFX.
 

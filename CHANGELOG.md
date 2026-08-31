@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.0-eval.9
+
+- Added an always-available read-only dashboard launcher beside the phone button.
+
 ## 0.4.0-eval.8
 
 - Accepted idempotent first-turn actor creation and legacy full-name fields.
