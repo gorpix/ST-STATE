@@ -1,6 +1,7 @@
 import { deepClone, deepEqual, hasOwn, isPlainObject, stableHash, stableStringify } from './util.js';
 import { migrateState, MAX_HISTORY, relationKey } from './schema.js';
 import { transactionIdentity } from './identity.js';
+import { MAX_RESIDUE_ENTRIES, residueEntries } from './residue.js';
 import { validatePatchEnvelope } from './validation.js';
 
 function setAtPath(target, path, value) {
@@ -114,6 +115,25 @@ function applyOperations(state, operations) {
                 };
             }
             for (const [field, value] of Object.entries(operation.set)) result.relations.pairs[key][field] = value;
+        } else if (operation.op === 'residue.set') {
+            if (!Array.isArray(result.residue)) result.residue = [];
+            if (operation.create) {
+                if (result.residue.length >= MAX_RESIDUE_ENTRIES) throw new Error(`Residue is limited to ${MAX_RESIDUE_ENTRIES} entries`);
+                result.residue.push(deepClone(operation.set));
+                continue;
+            }
+            const target = residueEntries(result.residue).find((entry) => entry.id === operation.id);
+            if (!target) throw new Error(`Residue ${operation.id} does not exist`);
+            const record = isPlainObject(result.residue[target.index]) ? deepClone(result.residue[target.index]) : { event: String(result.residue[target.index] ?? '') };
+            for (const [field, value] of Object.entries(operation.set)) {
+                if (value === '') delete record[field];
+                else record[field] = deepClone(value);
+            }
+            result.residue[target.index] = record;
+        } else if (operation.op === 'residue.remove') {
+            const target = residueEntries(result.residue).find((entry) => entry.id === operation.id);
+            if (!target) throw new Error(`Residue ${operation.id} does not exist`);
+            result.residue.splice(target.index, 1);
         } else {
             throw new Error(`Unsupported operation ${operation.op}`);
         }

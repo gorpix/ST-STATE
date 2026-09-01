@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.2-eval.1
+
+- Added native Emotional Residue create, update, clear, remove, local-frame IDs, and Shadow parity.
+- Removed Emotional Residue from Native compatibility fragments.
+
 ## 0.4.1
 
 - Stopped Native compatibility diffs from recursively embedding canonical history.

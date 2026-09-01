@@ -72,7 +72,6 @@ function bootstrapNativeActors(state, { userName = '', npcNames = [] } = {}) {
 
 const NATIVE_COMPATIBILITY_ROOTS = Object.freeze([
     ['FACTIONS', 'factions'],
-    ['EMOTIONAL RESIDUE', 'residue'],
     ['QUESTS', 'quests'],
     ['INV & SKILLS', 'inventory'],
     ["CHEKHOV'S GUN", 'chekhov'],

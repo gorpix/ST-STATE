@@ -7,7 +7,7 @@ import {
     onUpdate,
     onEnable,
     onDisable,
-} from './src/main.js?v=0.4.1';
+} from './src/main.js?v=0.4.2-eval.1';
 
 // SillyTavern resolves `generate_interceptor` by global name. Set it before
 // initialization so generation can use the release interceptor route even when

@@ -27,6 +27,8 @@ function parseLinePatch(candidate) {
     const sceneSet = {};
     const positions = {};
     const relationSets = new Map();
+    const residueSets = new Map();
+    const residueRemovals = new Set();
     for (const line of lines.slice(1)) {
         const equals = line.indexOf('=');
         if (equals > 0 && !line.includes('|')) {
@@ -80,11 +82,26 @@ function parseLinePatch(candidate) {
             relationSets.get(key).set[field] = lineValue(field, parts.slice(4).join('|'));
             continue;
         }
+        if (operation === 'residue.set') {
+            if (parts.length < 4) throw new Error(`Malformed ST_PATCH line: ${line}`);
+            const id = parts[1].trim().toLowerCase();
+            const field = parts[2].trim();
+            if (!residueSets.has(id)) residueSets.set(id, {});
+            residueSets.get(id)[field] = parts.slice(3).join('|').trim();
+            continue;
+        }
+        if (operation === 'residue.remove') {
+            if (parts.length !== 2) throw new Error(`Malformed ST_PATCH line: ${line}`);
+            residueRemovals.add(parts[1].trim().toLowerCase());
+            continue;
+        }
         throw new Error(`Unknown ST_PATCH line: ${line}`);
     }
     for (const [id, actor] of creates) patch.ops.push({ op: 'actor.create', id, actor });
     for (const [id, set] of actorSets) patch.ops.push({ op: 'actor.set', id, set });
     for (const relation of relationSets.values()) patch.ops.push({ op: 'relation.set', ...relation });
+    for (const [id, set] of residueSets) patch.ops.push({ op: 'residue.set', id, set });
+    for (const id of residueRemovals) patch.ops.push({ op: 'residue.remove', id });
     if (Object.keys(positions).length) sceneSet.positions = positions;
     if (Object.keys(sceneSet).length) patch.ops.push({ op: 'scene.set', set: sceneSet });
     return patch;

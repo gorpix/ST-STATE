@@ -63,6 +63,16 @@ test('Hybrid Native commits an authoritative patch without a full legacy block',
     assert.equal(context.chatMetadata.stStateShadow, undefined);
 });
 
+test('Hybrid Native commits Emotional Residue without a compatibility block', async () => {
+    const { context, engine, store } = setup();
+    setChatMode(context.chatMetadata, 'NATIVE');
+    const message = { is_user: false, mes: 'Alice remembers <!--ST_PATCH\nV2\nbase=GENESIS\nmode=NORMAL\ntx=native-residue\nresidue.set|new|subject|AL\nresidue.set|new|event|The door slammed\nresidue.set|new|meaning|Leaving is possible\nresidue.set|new|aftereffect|She watches every exit\nresidue.set|new|cue|A closing door\n-->' };
+    const result = await engine.processAssistantMessage(message, { index: 0, messageIdentity: 'native-residue-message' });
+    assert.equal(result.status, 'native_committed');
+    assert.deepEqual(store.load().residue, [{ subject: 'AL', event: 'The door slammed', meaning: 'Leaving is possible', aftereffect: 'She watches every exit', cue: 'A closing door' }]);
+    assert.equal(result.compatibility, false);
+});
+
 test('Hybrid Native bootstraps first-turn user and card identities before prompt injection', async () => {
     const { context, engine, store } = setup();
     context.name1 = 'Janko Makar';

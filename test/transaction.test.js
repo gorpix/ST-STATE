@@ -4,6 +4,7 @@ import { createEmptyState, migrateState } from '../src/schema.js';
 import { applyDiff, applyTransaction } from '../src/reducer.js';
 import { validatePatchEnvelope } from '../src/validation.js';
 import { deepEqual } from '../src/util.js';
+import { residueEntries } from '../src/residue.js';
 
 function state() {
     const value = createEmptyState({ now: 1 });
@@ -225,6 +226,43 @@ test('relation updates validate ranges and commit atomically', () => {
     const unknownActor = validatePatchEnvelope({ ...patch, ops: [{ op: 'relation.set', a: 'US', b: 'ZZ', field: 'bond', value: 1 }] }, { state: before });
     assert.equal(unknownActor.ok, false);
     assert.ok(unknownActor.errors.some((error) => /actor does not exist/.test(error)));
+});
+
+test('residue creates, updates, clears, and removes by stable local-frame ID', () => {
+    const before = state();
+    const created = applyTransaction(before, { version: 2, base: before.head, mode: 'NORMAL', tx: 'residue-create', ops: [
+        { op: 'residue.set', id: 'new', set: { subject: 'AL', event: 'The bridge gave way', meaning: 'Help can fail', aftereffect: 'Checks every railing', cue: 'Cracking wood' } },
+    ] }, { messageIdentity: 'residue-create-message', now: 2 });
+    assert.equal(created.status, 'committed');
+    assert.deepEqual(created.state.residue, [{ subject: 'AL', event: 'The bridge gave way', meaning: 'Help can fail', aftereffect: 'Checks every railing', cue: 'Cracking wood' }]);
+
+    const residueId = residueEntries(created.state.residue)[0].id;
+    const updated = applyTransaction(created.state, { version: 2, base: created.state.head, mode: 'NORMAL', tx: 'residue-update', ops: [
+        { op: 'residue.set', id: residueId, set: { meaning: 'Rescue has a cost', cue: 'None' } },
+    ] }, { messageIdentity: 'residue-update-message', now: 3 });
+    assert.equal(updated.status, 'committed');
+    assert.equal(updated.state.residue[0].meaning, 'Rescue has a cost');
+    assert.equal(Object.hasOwn(updated.state.residue[0], 'cue'), false);
+
+    const removed = applyTransaction(updated.state, { version: 2, base: updated.state.head, mode: 'NORMAL', tx: 'residue-remove', ops: [
+        { op: 'residue.remove', id: residueId },
+    ] }, { messageIdentity: 'residue-remove-message', now: 4 });
+    assert.equal(removed.status, 'committed');
+    assert.deepEqual(removed.state.residue, []);
+});
+
+test('residue rejects incomplete creation and unknown update IDs atomically', () => {
+    const before = state();
+    const incomplete = validatePatchEnvelope({ version: 2, base: before.head, mode: 'NORMAL', ops: [
+        { op: 'residue.set', id: 'new', set: { subject: 'AL' } },
+    ] }, { state: before });
+    assert.equal(incomplete.ok, false);
+    assert.ok(incomplete.errors.some((error) => /event/.test(error)));
+    const unknown = applyTransaction(before, { version: 2, base: before.head, mode: 'NORMAL', ops: [
+        { op: 'residue.set', id: 'r-missing', set: { cue: 'rain' } },
+    ] }, { now: 2 });
+    assert.equal(unknown.status, 'rejected');
+    assert.deepEqual(unknown.state, before);
 });
 
 test('legacy prose scene positions resolve known names and ignore object clauses', () => {

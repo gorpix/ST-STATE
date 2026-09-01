@@ -63,6 +63,9 @@ test('Hybrid Native injects local frame, authoritative patch rules, compatibilit
     assert.match(prompt.text, /begin with the exact header required by the active preset/);
     assert.match(prompt.text, /Never place prose, compatibility state, ST_PATCH, or ST_GFX before that header/);
     assert.match(prompt.text, /only those changed sections/);
+    assert.match(prompt.text, /Emotional Residue are native/);
+    assert.match(prompt.text, /residue\.set\|RID\|field\|value/);
+    assert.doesNotMatch(prompt.text, /Profiles, Emotional Residue, Quests/);
     assert.match(prompt.text, /exactly one complete hidden ST_PATCH/);
     assert.doesNotMatch(formatDicePool(prompt.selection, { rollProvider: () => 9 }), /US\|d20/);
     assert.doesNotMatch(formatDicePool(prompt.selection, { rollProvider: () => 9 }), /BO\|d20/);

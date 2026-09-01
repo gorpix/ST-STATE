@@ -40,6 +40,14 @@ test('legacy relationship row shape and semantic round trip are stable', () => {
     assert.match(exported, /distant bells/);
 });
 
+test('legacy export renders native residue actor IDs as display names', () => {
+    const state = createEmptyState({ now: 1 });
+    state.actors.AL = { id: 'AL', name: 'Alice' };
+    state.actors.BO = { id: 'BO', name: 'Bob' };
+    state.residue = [{ subject: 'AL/BO', event: 'A promise broke', meaning: 'Trust has a cost' }];
+    assert.match(exportLegacyState(state), /- Alice\/Bob \| Event: A promise broke \| Meaning: Trust has a cost/);
+});
+
 test('explicit legacy actor IDs survive import/export without renaming', () => {
     const source = `<!-- GFX_START -->\n<internal_states>\n<details><summary>🎬 INTERNAL STATES (Turn: 3)</summary>\n<details><summary>👥 NPC STATE</summary>\n- [QZ] Quill | At: desk | Doing: writing | Agenda: None | VAD: 0/0/0 | Focus: ink | Aware: room | Fibs: None | Circle: None | Body: well\n</details>\n<details><summary>💚 BONDS</summary>\n- Quill ↔ User | BOND: 2 | Sparks: 0 | Grudge: 0\n</details>\n</details>\n</internal_states>\n<!-- GFX_END -->`;
     const imported = importLegacyState(source).state;

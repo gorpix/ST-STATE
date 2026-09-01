@@ -39,6 +39,26 @@ test('parses and groups line-based relationship updates', () => {
     assert.deepEqual(result.patch.ops, [{ op: 'relation.set', a: 'US', b: 'AL', set: { bond: 4, sparks: 2, grudge: 1 } }]);
 });
 
+test('parses grouped residue creation, updates, and removal', () => {
+    const text = `<!--ST_PATCH
+V2
+base=h-4
+mode=NORMAL
+residue.set|new|subject|AL/BO
+residue.set|new|event|The promise broke | publicly
+residue.set|new|meaning|Trust now has a cost
+residue.set|r-old|cue|The same song
+residue.remove|r-gone
+-->`;
+    const result = extractHiddenPatch(text);
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.patch.ops, [
+        { op: 'residue.set', id: 'new', set: { subject: 'AL/BO', event: 'The promise broke | publicly', meaning: 'Trust now has a cost' } },
+        { op: 'residue.set', id: 'r-old', set: { cue: 'The same song' } },
+        { op: 'residue.remove', id: 'r-gone' },
+    ]);
+});
+
 test('accepts legacy ct metadata without turning it into a state operation', () => {
     for (const ctLine of ['ct|3', 'ct=3']) {
         const text = `<!--ST_PATCH\nV2\nbase=h-2\nmode=NORMAL\n${ctLine}\nactor.set|AL|thoughts|Keep the door in view\n-->`;

@@ -71,6 +71,21 @@ test('relationship claims participate in Shadow parity', () => {
     assert.ok(!report.unsupportedDomains.includes('relations'));
 });
 
+test('residue claims compare native actor IDs with legacy actor names', () => {
+    const authoritative = createEmptyState({ now: 1 });
+    authoritative.ct = 1; authoritative.meta.ct = 1;
+    authoritative.actors.AL = { id: 'AL', name: 'Alice' };
+    authoritative.residue = [{ subject: 'Alice', event: 'The door slammed', meaning: 'Leaving is possible', cue: 'A closing door' }];
+    const candidate = structuredClone(authoritative);
+    candidate.residue = [{ subject: 'AL', event: 'The door slammed', meaning: 'Leaving is possible', cue: 'A closing door' }];
+    const patch = { ops: [{ op: 'residue.set', id: 'new', set: candidate.residue[0], create: true }] };
+    assert.deepEqual(shadowClaimedPaths(patch), ['ct', 'residue']);
+    const report = compareShadowParity(authoritative, candidate, { patch });
+    assert.equal(report.status, 'match');
+    assert.ok(report.supportedRoots.includes('residue'));
+    assert.ok(!report.unsupportedDomains.includes('residue'));
+});
+
 test('legacy punctuation variants match while changed words still diverge', () => {
     const authoritative = createEmptyState({ now: 1 });
     authoritative.ct = 2; authoritative.meta.ct = 2;
@@ -103,7 +118,7 @@ test('shadow handshake exposes the evaluator contract and exact control markers'
         'flash=flash_handoff',
         'stateCt=0',
         'stateHead=GENESIS',
-        'features=actor,scene,relation',
+        'features=actor,scene,relation,residue',
         'END_ST_STATE_HANDSHAKE',
     ].join('\n'));
 });

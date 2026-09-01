@@ -43,7 +43,9 @@ test('Unified Local Frame folds position, thoughts, and residue into one actor r
     assert.equal(alice.position, 'beneath the platform clock');
     assert.equal(alice.state.activity, 'watching Bob');
     assert.deepEqual(alice.thoughts, ['He is going to miss it.']);
-    assert.deepEqual(alice.residue, [{ event: 'Bob hesitated', meaning: 'He may stay', aftereffect: 'Hope', cue: 'His hand near hers' }]);
+    assert.match(alice.residue[0].id, /^r-/);
+    const { id: _residueId, ...aliceResidue } = alice.residue[0];
+    assert.deepEqual(aliceResidue, { event: 'Bob hesitated', meaning: 'He may stay', aftereffect: 'Hope', cue: 'His hand near hers' });
     assert.equal(Object.hasOwn(alice, 'location'), false);
     assert.equal(Object.hasOwn(alice, 'at'), false);
     assert.equal(frame.world.environment, 'A rain-streaked station platform');

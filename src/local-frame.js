@@ -1,4 +1,5 @@
 import { migrateState } from './schema.js';
+import { residueEntries } from './residue.js';
 import { isPlainObject, sanitizePlainText, stableStringify } from './util.js';
 
 const ACTOR_TEXT_FIELDS = Object.freeze(['focus', 'aware', 'fibs', 'circle', 'body']);
@@ -129,10 +130,10 @@ function compactThought(item) {
     };
 }
 
-function compactResidue(item) {
+function compactResidue(item, id = '') {
     if (typeof item === 'string') return { event: cleanText(item, 2000) };
     if (!isPlainObject(item)) return { event: cleanText(item, 2000) };
-    const result = {};
+    const result = id ? { id } : {};
     const fields = [
         ['subject', item.subject ?? item.actor ?? item.name],
         ['event', item.event],
@@ -186,8 +187,8 @@ export function projectUnifiedLocalFrame(input, options = {}) {
             frame.thoughts.push(thought.thoughts);
         } else if (options.includeUnassigned !== false && Object.keys(thought).length) unassignedThoughts.push(thought);
     }
-    for (const raw of state.residue) {
-        const residue = compactResidue(raw);
+    for (const entry of residueEntries(state.residue)) {
+        const residue = compactResidue(entry.record, entry.id);
         const id = resolveActorId(residue.subject, aliases);
         if (id && actorFrames.has(id)) {
             const frame = actorFrames.get(id);

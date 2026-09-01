@@ -1,5 +1,6 @@
 import { ALLOWLISTED_ACTOR_FIELDS, ALLOWLISTED_SCENE_FIELDS, SCHEMA_VERSION } from './schema.js';
 import { isValidActorId } from './identity.js';
+import { isResidueId, NEW_RESIDUE_ID_PATTERN, RESIDUE_FIELDS, residueEntries } from './residue.js';
 import { deepClone, hasOwn, isPlainObject, sanitizePlainText } from './util.js';
 
 export const PATCH_MODES = Object.freeze(['NORMAL', 'OOC', 'FLASH']);
@@ -20,6 +21,8 @@ const ACTOR_OP_KEYS = new Set(['op', 'id', 'field', 'value', 'set', 'fields']);
 const CREATE_OP_KEYS = new Set(['op', 'id', 'actor', 'set', 'fields']);
 const SCENE_OP_KEYS = new Set(['op', 'field', 'value', 'set', 'fields']);
 const RELATION_OP_KEYS = new Set(['op', 'a', 'b', 'field', 'value', 'set', 'fields']);
+const RESIDUE_SET_OP_KEYS = new Set(['op', 'id', 'field', 'value', 'set', 'fields']);
+const RESIDUE_REMOVE_OP_KEYS = new Set(['op', 'id']);
 const RELATION_FIELDS = Object.freeze(['bond', 'sparks', 'grudge']);
 
 function fail(errors, path, message) {
@@ -242,6 +245,19 @@ function assignRelationField(fields, field, value, path, errors) {
     fields[canonicalField] = number;
 }
 
+function assignResidueField(fields, field, value, path, errors) {
+    const canonicalField = RESIDUE_FIELDS.find((candidate) => normalizeFieldTerm(candidate) === normalizeFieldTerm(field));
+    if (!canonicalField) {
+        fail(errors, path, `field "${field}" is not allowlisted`);
+        return;
+    }
+    const normalized = validateText(value, path, errors, {
+        allowEmpty: !['subject', 'event'].includes(canonicalField),
+        maxLength: canonicalField === 'subject' ? 200 : 2000,
+    });
+    fields[canonicalField] = /^none$/i.test(normalized.trim()) ? '' : normalized;
+}
+
 function extractOperationFields(operation, path, allowedKeys, errors) {
     checkKeys(operation, allowedKeys, path, errors);
     const hasSet = hasOwn(operation, 'set') || hasOwn(operation, 'fields');
@@ -343,6 +359,33 @@ function normalizeOperation(operation, index, knownActors, errors, state = null)
         }
         if (hasField) assignRelationField(set, operation.field, operation.value, `${path}.value`, errors);
         return { op: operation.op, a: operation.a, b: operation.b, set };
+    }
+    if (operation.op === 'residue.set') {
+        const { hasSet, hasField, setValue } = extractOperationFields(operation, path, RESIDUE_SET_OP_KEYS, errors);
+        const id = String(operation.id ?? '').trim().toLowerCase();
+        if (!isResidueId(id, { allowNew: true })) fail(errors, `${path}.id`, 'must be an existing r-ID or new/new-N');
+        const existing = residueEntries(state?.residue).some((entry) => entry.id === id);
+        const creating = NEW_RESIDUE_ID_PATTERN.test(id);
+        if (!existing && !creating) fail(errors, `${path}.id`, 'does not identify current residue; use new or new-N to create one');
+        const set = {};
+        if (hasSet && isPlainObject(setValue)) {
+            const entries = prepareFieldEntries(setValue, (field) => RESIDUE_FIELDS.find((candidate) => normalizeFieldTerm(candidate) === normalizeFieldTerm(field)), path, errors);
+            for (const entry of entries) assignResidueField(set, entry.field, entry.value, `${path}.set.${entry.field}`, errors);
+        }
+        if (hasField) assignResidueField(set, operation.field, operation.value, `${path}.value`, errors);
+        if (creating) {
+            if (!set.subject) fail(errors, `${path}.set.subject`, 'is required when creating residue');
+            if (!set.event) fail(errors, `${path}.set.event`, 'is required when creating residue');
+        }
+        if (!Object.keys(set).length) fail(errors, `${path}.set`, 'must change at least one residue field');
+        return { op: operation.op, id, set, create: creating };
+    }
+    if (operation.op === 'residue.remove') {
+        checkKeys(operation, RESIDUE_REMOVE_OP_KEYS, path, errors);
+        const id = String(operation.id ?? '').trim().toLowerCase();
+        if (!isResidueId(id)) fail(errors, `${path}.id`, 'must be an existing residue r-ID');
+        else if (!residueEntries(state?.residue).some((entry) => entry.id === id)) fail(errors, `${path}.id`, 'does not identify current residue');
+        return { op: operation.op, id };
     }
     fail(errors, path, `unknown operation "${operation.op}"`);
     return null;

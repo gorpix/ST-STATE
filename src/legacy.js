@@ -217,6 +217,10 @@ function actorLabel(state, id) {
     return state.actors[id]?.name || id;
 }
 
+function residueSubjectLabel(state, subject) {
+    return String(subject ?? '').split('/').map((part) => actorLabel(state, part.trim())).join('/');
+}
+
 function parseAgenda(value) {
     const match = String(value ?? '').match(/^(.*?);\s*(\d+)\s*\/\s*(\d+)$/);
     return match ? { text: parseValueOrNone(match[1]), step: Number(match[2]), max: Number(match[3]) } : { text: parseValueOrNone(value), step: 0, max: 0 };
@@ -606,7 +610,7 @@ export function exportLegacyState(input, options = {}) {
         exportDetails(SECTION_NAMES.npc, Object.values(state.actors).map(exportActorLine).join('\n')),
         exportDetails(SECTION_NAMES.factions, Object.values(state.factions).map((faction) => `- <b>${valueOrNone(faction.name)}</b> | Goal: ${valueOrNone(faction.goal)} | Intel: ${valueOrNone(faction.intel)} | Fibs: ${valueOrNone(faction.fibs)} | State: ${valueOrNone(faction.state)} | Conflict: ${valueOrNone(faction.conflict)} | Relations: ${valueOrNone(faction.relations)}`).join('\n')),
         exportDetails(SECTION_NAMES.bonds, exportRelationRows(state).join('\n')),
-        exportDetails(SECTION_NAMES.residue, state.residue.map((item) => `- ${valueOrNone(item.subject)} | Event: ${valueOrNone(item.event)} | Meaning: ${valueOrNone(item.meaning)} | Aftereffect: ${valueOrNone(item.aftereffect)} | Cue: ${valueOrNone(item.cue)}`).join('\n')),
+        exportDetails(SECTION_NAMES.residue, state.residue.map((item) => `- ${valueOrNone(residueSubjectLabel(state, item.subject))} | Event: ${valueOrNone(item.event)} | Meaning: ${valueOrNone(item.meaning)} | Aftereffect: ${valueOrNone(item.aftereffect)} | Cue: ${valueOrNone(item.cue)}`).join('\n')),
         exportDetails(SECTION_NAMES.quests, state.quests.map((item) => `- <b>${valueOrNone(item.title ?? item.name)}</b> | State: ${valueOrNone(item.state)} | Objective: ${valueOrNone(item.objective)} | Progress: ${valueOrNone(item.progress)} | Reward: ${valueOrNone(item.reward)} | Lock/Owner: ${valueOrNone(item.lockOwner ?? item.owner)}`).join('\n')),
         exportDetails(SECTION_NAMES.inventory, `- <b>Inv:</b> ${valueOrNone(state.inventory.items)}<br>- <b>Titles/Skills:</b> ${valueOrNone(state.inventory.titlesSkills)}<br>- <b>Status:</b> ${valueOrNone(state.inventory.status)}<br>- <b>Mods:</b> ${valueOrNone(state.inventory.modifiers)}`),
         exportDetails(SECTION_NAMES.chekhov, `- Active: ${valueOrNone(state.chekhov.active)} | Locked: ${valueOrNone(state.chekhov.locked)} | Fired: ${valueOrNone(state.chekhov.fired)}`),

@@ -32,7 +32,7 @@ The model emits structured plain-text arguments, never HTML. `gfx.js` validates 
 
 ## M2 scope boundary
 
-The implemented reducers cover `actor.set`, `actor.create`, actor thoughts through the legacy `actor.set|ID|thoughts|...` form, `scene.set`, and numeric `relation.set` for Bond/Sparks/Grudge, with `NORMAL`, `OOC`, and `FLASH` routing. Directional relationship profiles, factions, residue, quests, inventory, Chekhov, notebook, DND, World Sim, clocks, knowledge, commitments, persistent artifact state, and full Flash mechanics remain compatibility-backed or schema-only. Local artifact rendering is presentation-only and does not widen this mutation boundary.
+The implemented reducers cover `actor.set`, `actor.create`, actor thoughts through the legacy `actor.set|ID|thoughts|...` form, `scene.set`, numeric `relation.set` for Bond/Sparks/Grudge, and `residue.set`/`residue.remove`, with `NORMAL`, `OOC`, and `FLASH` routing. Residue transport IDs are derived for the local frame and never leak into legacy serialization. Directional relationship profiles, factions, quests, inventory, Chekhov, notebook, DND, World Sim, clocks, knowledge, commitments, persistent artifact state, and full Flash mechanics remain compatibility-backed or schema-only. Local artifact rendering is presentation-only and does not widen this mutation boundary.
 
 ## Host integration and degradation
 
