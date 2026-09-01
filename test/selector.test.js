@@ -11,6 +11,7 @@ test('hot selector includes exact mentions, spotlight/on-screen actors, and dire
         BO: { id: 'BO', name: 'Bob', at: 'room' },
         CA: { id: 'CA', name: 'Carol', at: 'far away' },
         DE: { id: 'DE', name: 'Derek', at: 'far away' },
+        EF: { id: 'EF', name: 'Eve', at: 'couch behind Alice' },
     };
     state.scene.spotlight = ['AL'];
     state.scene.positions = { AL: 'room', BO: 'room' };
@@ -20,13 +21,15 @@ test('hot selector includes exact mentions, spotlight/on-screen actors, and dire
         'CA|DE': { a: 'CA', b: 'DE', bond: 2, sparks: 0, grudge: 0 },
     };
     const selected = selectHotState(state, { userText: 'Alice asks about the lantern.' });
-    assert.deepEqual(selected.selectedActorIds.sort(), ['AL', 'BO', 'US'].sort());
+    assert.deepEqual(selected.selectedActorIds.sort(), ['AL', 'BO', 'EF', 'US'].sort());
     assert.deepEqual(selected.selectedRelationKeys.sort(), ['AL|BO', 'BO|CA'].sort());
     assert.ok(selected.coldActorIds.includes('CA'));
+    assert.ok(!selected.coldActorIds.includes('EF'));
     const pack = buildHotStatePack(state, { userText: 'Alice asks about the lantern.' });
     assert.match(pack, /ST_STATE_PACK v2/);
     assert.match(pack, /ACTOR/);
     assert.doesNotMatch(pack, /Carol/);
+    assert.match(pack, /Eve/);
 });
 
 test('protocol keeps an ordinary zero-delta RP turn NORMAL', () => {

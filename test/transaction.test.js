@@ -231,6 +231,25 @@ test('actor and scene clears remove stale happenings and semantic aliases', () =
     assert.equal(Object.hasOwn(result.state.scene.positions, 'AL'), false);
 });
 
+test('actor setters replace stale location and activity aliases', () => {
+    const before = state();
+    before.actors.AL.position = 'old doorway';
+    before.actors.AL.location = 'older hall';
+    before.actors.AL.doing = 'old action';
+    before.actors.AL.activity = 'tied';
+    const result = applyTransaction(before, { version: 2, base: before.head, mode: 'NORMAL', tx: 'replace-aliases', ops: [
+        { op: 'actor.set', id: 'AL', set: { at: 'couch', doing: 'resting' } },
+    ] }, { messageIdentity: 'replace-aliases-message', now: 2 });
+    assert.equal(result.status, 'committed');
+    assert.deepEqual({
+        at: result.state.actors.AL.at,
+        location: result.state.actors.AL.location,
+        position: result.state.actors.AL.position,
+        doing: result.state.actors.AL.doing,
+        activity: result.state.actors.AL.activity,
+    }, { at: 'couch', location: undefined, position: undefined, doing: 'resting', activity: undefined });
+});
+
 test('clear validation rejects identity fields and unknown actors', () => {
     const before = state();
     const identity = validatePatchEnvelope({ version: 2, base: before.head, mode: 'NORMAL', ops: [

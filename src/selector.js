@@ -53,8 +53,14 @@ function isOnScreenActor(state, id, actor, options) {
     if (state.scene?.positions && Object.prototype.hasOwnProperty.call(state.scene.positions, id)) return true;
     const actorPosition = actor?.position ?? actor?.at ?? actor?.location;
     if (!actorPosition) return false;
+    const normalizedPosition = String(actorPosition).trim();
+    if (!normalizedPosition || /^(?:none|unknown|n\/?a)$/i.test(normalizedPosition)) return false;
+    if (/\b(?:elsewhere|off[- ]?screen|away|absent|departed|not present|another room|upstairs|downstairs|outside)\b/i.test(normalizedPosition)) return false;
     const positions = Object.values(state.scene?.positions ?? {}).map((value) => String(value).toLowerCase());
-    return positions.length > 0 && positions.includes(String(actorPosition).toLowerCase());
+    if (positions.includes(normalizedPosition.toLowerCase())) return true;
+    // Actor-level placement is still evidence of presence when the sparse
+    // scene.positions map has not repeated every person in the active scene.
+    return true;
 }
 
 function compactActor(actor, id) {

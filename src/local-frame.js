@@ -79,7 +79,7 @@ function compactActor(actor, id, scene, spotlightIds) {
         const position = firstMeaningfulText([scene.positions?.[id], actor.position, actor.location, actor.at], 500);
         if (isMeaningful(position)) frame.position = position;
         const userState = {};
-        const activity = firstMeaningfulText([actor.activity, actor.doing], 1000);
+        const activity = firstMeaningfulText([actor.doing, actor.activity], 1000);
         if (isMeaningful(activity)) userState.activity = activity;
         for (const field of ['circle', 'body']) {
             const value = cleanTextOrList(actor[field], 1000);
@@ -95,7 +95,7 @@ function compactActor(actor, id, scene, spotlightIds) {
     if (isMeaningful(position)) frame.position = position;
 
     const state = {};
-    const activity = firstMeaningfulText([actor.activity, actor.doing], 1000);
+    const activity = firstMeaningfulText([actor.doing, actor.activity], 1000);
     const agenda = firstMeaningfulText([actor.agenda, actor.agendaGoal], 1000);
     if (isMeaningful(activity)) state.activity = activity;
     if (isMeaningful(agenda)) state.agenda = agenda;

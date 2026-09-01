@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.2-eval.4
+
+- Included actor-positioned participants when sparse scene positions omit them.
+- Made actor location/activity setters replace stale aliases instead of leaving older values with display priority.
+
 ## 0.4.2-eval.3
 
 - Added native actor/scene clear operations and a final-beat freshness audit to remove facts that stopped being true.

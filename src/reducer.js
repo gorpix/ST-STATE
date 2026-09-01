@@ -89,7 +89,13 @@ function applyOperations(state, operations) {
             if (!isPlainObject(actor)) throw new Error(`Actor ${operation.id} does not exist`);
             for (const [field, value] of Object.entries(operation.set)) {
                 if (field === 'thoughts') setActorThoughts(operation.id, value);
-                else actor[field] = deepClone(value);
+                else if (['at', 'location', 'position'].includes(field)) {
+                    for (const alias of ['at', 'location', 'position']) delete actor[alias];
+                    actor[field] = deepClone(value);
+                } else if (['doing', 'activity'].includes(field)) {
+                    for (const alias of ['doing', 'activity']) delete actor[alias];
+                    actor[field] = deepClone(value);
+                } else actor[field] = deepClone(value);
             }
         } else if (operation.op === 'actor.clear') {
             const actor = result.actors[operation.id];
