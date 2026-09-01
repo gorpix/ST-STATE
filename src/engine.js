@@ -1,6 +1,6 @@
 import { ChatSwitchError } from './store.js';
 import { applyTransaction, makeDiff, summarizeDiff } from './reducer.js';
-import { buildProtocolPrompt } from './selector.js';
+import { buildProtocolPrompt, selectHotState } from './selector.js';
 import { extractHiddenPatch, messageText, stripMessageControlPayload } from './patch.js';
 import { makeStableActorId, transactionIdentity } from './identity.js';
 import { extractLatestInternalStates, importLegacyState, stripMessageInternalStatesPayload } from './legacy.js';
@@ -348,7 +348,9 @@ export class STStateEngine {
             return result;
         }
 
-        let applied = applyTransaction(compatibility.state, extracted.patch, { messageIdentity: identity, flashHandoff: false, now: this.now() });
+        const selection = selectHotState(state, { userText: this.latestUserText() });
+        const presentActorIds = [...new Set([...selection.presentActorIds, ...(state.actors?.US ? ['US'] : [])])];
+        let applied = applyTransaction(compatibility.state, extracted.patch, { messageIdentity: identity, flashHandoff: false, now: this.now(), presentActorIds });
         applied = includeCompatibilityInCommit(applied, state);
         if (applied.status !== 'committed') {
             const result = { ...applied, status: `native_${applied.status}`, mode: 'NATIVE', state, displayText: extracted.prose, extracted, persisted: false, compatibility: compatibility.found };

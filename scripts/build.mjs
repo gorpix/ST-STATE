@@ -9,7 +9,8 @@ const required = ['display_name', 'js', 'author', 'version'];
 for (const key of required) if (!manifest[key]) throw new Error(`manifest.json missing ${key}`);
 for (const file of [manifest.js, manifest.css]) {
     if (!file) continue;
-    if (!fs.existsSync(path.join(root, file))) throw new Error(`manifest file not found: ${file}`);
+    const localFile = String(file).split('?', 1)[0];
+    if (!fs.existsSync(path.join(root, localFile))) throw new Error(`manifest file not found: ${file}`);
 }
 const sourceFiles = [];
 function walk(directory) {

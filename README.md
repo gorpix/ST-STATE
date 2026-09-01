@@ -11,6 +11,8 @@ Browser-only SillyTavern extension for per-chat state, Shadow parity, evaluative
 
 Native is opt-in and evaluative. Actors, actor thoughts, scene, Emotional Residue, and numeric relationships are native. Factions, quests, inventory, Chekhov, notebook, DND, World Sim, clocks, knowledge, commitments, and persistent artifact state remain compatibility-backed.
 
+Present-actor and scene happenings have bounded freshness leases. Native patches can use `actor.hold` for a condition that remains true until replaced or cleared, or `actor.once` for an action that ends after the current response; these lifetime markers stay local and never enter visible prose.
+
 The extension also provides a unified local frame, automatic first-turn identity bootstrap, one injected d20 per present NPC, branch checkpoints for swipes/edits/deletes, and a text-only `ST_GFX V1` renderer. Bootstrap adds identity records only; scene and mechanics changes require a validated transaction.
 
 ## Install

@@ -310,7 +310,7 @@ function normalizeOperation(operation, index, knownActors, errors, state = null)
         fail(errors, `${path}.op`, 'must be a string');
         return null;
     }
-    if (operation.op === 'actor.set') {
+    if (['actor.set', 'actor.hold', 'actor.once'].includes(operation.op)) {
         const { hasSet, hasField, setValue } = extractOperationFields(operation, path, ACTOR_OP_KEYS, errors);
         if (!isValidActorId(operation.id)) fail(errors, `${path}.id`, 'must be a two-letter uppercase actor ID');
         if (isValidActorId(operation.id) && !knownActors.has(operation.id)) fail(errors, `${path}.id`, 'actor does not exist in the base state or an earlier actor.create');
@@ -329,7 +329,12 @@ function normalizeOperation(operation, index, knownActors, errors, state = null)
         if (hasField) {
             assignActorField(fields, operation.field, operation.value, `${path}.value`, errors);
         }
-        return { op: operation.op, id: operation.id, set: fields };
+        return {
+            op: 'actor.set',
+            id: operation.id,
+            set: fields,
+            ...(operation.op === 'actor.set' ? {} : { lifetime: operation.op.slice('actor.'.length) }),
+        };
     }
     if (operation.op === 'actor.create') {
         checkKeys(operation, CREATE_OP_KEYS, path, errors);

@@ -4,6 +4,86 @@ import { transactionIdentity } from './identity.js';
 import { MAX_RESIDUE_ENTRIES, residueEntries } from './residue.js';
 import { validatePatchEnvelope } from './validation.js';
 
+const ACTOR_HAPPENING_LEASES = Object.freeze({
+    activity: 2,
+    focus: 2,
+    spotlight: 2,
+    location: 3,
+    body: 3,
+    circle: 4,
+});
+const SCENE_HAPPENING_LEASES = Object.freeze({ spotlight: 2, environment: 3, positions: 3, timePressure: 5 });
+
+function happeningFamily(path) {
+    const parts = String(path ?? '').split('.');
+    if (parts[0] === 'actors' && parts.length >= 3) {
+        const field = parts[2];
+        if (['at', 'location', 'position'].includes(field)) return `actors.${parts[1]}.location`;
+        if (['doing', 'activity'].includes(field)) return `actors.${parts[1]}.activity`;
+        if (Object.hasOwn(ACTOR_HAPPENING_LEASES, field)) return `actors.${parts[1]}.${field}`;
+    }
+    if (parts[0] === 'scene' && Object.hasOwn(SCENE_HAPPENING_LEASES, parts[1])) {
+        return parts[1] === 'positions' && parts[2] ? `scene.positions.${parts[2]}` : `scene.${parts[1]}`;
+    }
+    return '';
+}
+
+function lastTouches(state) {
+    const history = Array.isArray(state.history) ? state.history : [];
+    const counters = history.map((entry) => entry?.ct).filter(Number.isInteger);
+    const baseline = counters.length ? Math.min(...counters) - 1 : state.ct;
+    const touched = new Map();
+    for (const entry of history) {
+        if (!Number.isInteger(entry?.ct)) continue;
+        for (const change of entry.diff?.forward ?? []) {
+            const family = happeningFamily(change?.path);
+            if (family) touched.set(family, Math.max(touched.get(family) ?? baseline, entry.ct));
+        }
+    }
+    return { baseline, touched };
+}
+
+function happeningLifetimes(state) {
+    if (!isPlainObject(state.opaque)) state.opaque = {};
+    if (!isPlainObject(state.opaque.happeningLifetimes)) state.opaque.happeningLifetimes = {};
+    return state.opaque.happeningLifetimes;
+}
+
+/** Expire high-churn facts for present actors; durable knowledge is untouched. */
+export function expireStaleHappenings(inputState, presentActorIds = []) {
+    const state = deepClone(inputState);
+    const present = new Set((presentActorIds ?? []).filter((id) => isPlainObject(state.actors?.[id])));
+    const { baseline, touched } = lastTouches(state);
+    const lifetimes = happeningLifetimes(state);
+    const age = (family) => state.ct - (touched.get(family) ?? baseline);
+    for (const id of present) {
+        const actor = state.actors[id];
+        for (const [family, lease] of Object.entries(ACTOR_HAPPENING_LEASES)) {
+            const path = `actors.${id}.${family}`;
+            const lifetime = lifetimes[path];
+            if (lifetime?.mode === 'hold') continue;
+            const onceExpired = lifetime?.mode === 'once' && Number(lifetime.setCt) <= state.ct;
+            if (!onceExpired && age(path) <= lease) continue;
+            if (family === 'location') for (const field of ['at', 'location', 'position']) delete actor[field];
+            else if (family === 'activity') for (const field of ['doing', 'activity']) delete actor[field];
+            else delete actor[family];
+            delete lifetimes[path];
+        }
+        const progress = String(actor.agenda ?? '').match(/\((\d+)\s*\/\s*(\d+)\)\s*$/);
+        if (progress && Number(progress[1]) >= Number(progress[2])) delete actor.agenda;
+    }
+    for (const [field, lease] of Object.entries(SCENE_HAPPENING_LEASES)) {
+        if (field === 'positions') {
+            for (const id of Object.keys(state.scene.positions ?? {})) {
+                if (present.has(id) && age(`scene.positions.${id}`) > lease) delete state.scene.positions[id];
+            }
+        } else if (age(`scene.${field}`) > lease) {
+            state.scene[field] = field === 'spotlight' ? [] : 'None';
+        }
+    }
+    return state;
+}
+
 function setAtPath(target, path, value) {
     const parts = path.split('.');
     let cursor = target;
@@ -66,8 +146,14 @@ export function applyDiff(state, changes) {
     return result;
 }
 
-function applyOperations(state, operations) {
+function applyOperations(state, operations, options = {}) {
     const result = deepClone(state);
+    const lifetimes = happeningLifetimes(result);
+    const recordLifetime = (path, lifetime) => {
+        if (!path) return;
+        if (lifetime === 'hold' || lifetime === 'once') lifetimes[path] = { mode: lifetime, setCt: options.ct };
+        else delete lifetimes[path];
+    };
     const setActorThoughts = (id, value) => {
         const actor = result.actors[id] ?? {};
         const aliases = new Set([id, actor.name, actor.displayName].filter(Boolean).map((item) => String(item).trim().toLowerCase()));
@@ -88,6 +174,7 @@ function applyOperations(state, operations) {
             // caller cannot turn a missing actor into an arbitrary object path.
             if (!isPlainObject(actor)) throw new Error(`Actor ${operation.id} does not exist`);
             for (const [field, value] of Object.entries(operation.set)) {
+                recordLifetime(happeningFamily(`actors.${operation.id}.${field}`), operation.lifetime);
                 if (field === 'thoughts') setActorThoughts(operation.id, value);
                 else if (['at', 'location', 'position'].includes(field)) {
                     for (const alias of ['at', 'location', 'position']) delete actor[alias];
@@ -101,6 +188,7 @@ function applyOperations(state, operations) {
             const actor = result.actors[operation.id];
             if (!isPlainObject(actor)) throw new Error(`Actor ${operation.id} does not exist`);
             for (const field of operation.fields) {
+                recordLifetime(happeningFamily(`actors.${operation.id}.${field}`));
                 if (field === 'location') for (const alias of ['at', 'location', 'position']) delete actor[alias];
                 else if (field === 'activity') for (const alias of ['doing', 'activity']) delete actor[alias];
                 else if (field === 'thoughts') setActorThoughts(operation.id, 'None');
@@ -212,7 +300,8 @@ export function applyTransaction(inputState, inputPatch, options = {}) {
 
     let staged;
     try {
-        staged = applyOperations(before, patch.ops);
+        const refreshedBase = expireStaleHappenings(before, options.presentActorIds);
+        staged = applyOperations(refreshedBase, patch.ops, { ct: before.ct + 1 });
     } catch (error) {
         return { ok: false, status: 'rejected', reason: 'apply_failed', errors: [String(error?.message ?? error)], state: before, patch, transactionId, identityKeys, diff: { forward: [], inverse: [] } };
     }

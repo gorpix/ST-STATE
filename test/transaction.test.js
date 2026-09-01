@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createEmptyState, migrateState } from '../src/schema.js';
-import { applyDiff, applyTransaction } from '../src/reducer.js';
+import { applyDiff, applyTransaction, expireStaleHappenings } from '../src/reducer.js';
 import { validatePatchEnvelope } from '../src/validation.js';
 import { deepEqual } from '../src/util.js';
 import { residueEntries } from '../src/residue.js';
@@ -248,6 +248,95 @@ test('actor setters replace stale location and activity aliases', () => {
         doing: result.state.actors.AL.doing,
         activity: result.state.actors.AL.activity,
     }, { at: 'couch', location: undefined, position: undefined, doing: 'resting', activity: undefined });
+});
+
+test('present-actor and scene happenings expire without deleting durable state', () => {
+    const before = state();
+    before.ct = 9;
+    before.meta.ct = 9;
+    Object.assign(before.actors.AL, {
+        doing: 'tied to the chair',
+        focus: 'the knot tightening',
+        body: 'wrists bound',
+        circle: 'keeps checking the rope',
+        agenda: 'Finish the tying (3/3)',
+        aware: ['The visitor knows the passcode'],
+    });
+    before.scene.environment = 'Rope and towels cover the floor';
+    before.scene.spotlight = ['AL'];
+    before.scene.positions.AL = 'tied to the chair';
+    before.history = [{
+        ct: 4,
+        diff: { forward: [
+            { path: 'actors.AL.doing', before: 'standing', after: 'tied to the chair' },
+            { path: 'actors.AL.focus', before: 'the door', after: 'the knot tightening' },
+            { path: 'actors.AL.body', before: 'free', after: 'wrists bound' },
+            { path: 'actors.AL.circle', before: 'None', after: 'keeps checking the rope' },
+            { path: 'scene.environment', before: 'clear floor', after: 'Rope and towels cover the floor' },
+            { path: 'scene.spotlight', before: [], after: ['AL'] },
+            { path: 'scene.positions.AL', before: 'standing', after: 'tied to the chair' },
+        ] },
+    }];
+
+    const expired = expireStaleHappenings(before, ['AL']);
+    for (const field of ['doing', 'focus', 'body', 'circle', 'agenda', 'at']) {
+        assert.equal(Object.hasOwn(expired.actors.AL, field), false, field);
+    }
+    assert.deepEqual(expired.actors.AL.aware, ['The visitor knows the passcode']);
+    assert.deepEqual(expired.relations, before.relations);
+    assert.equal(expired.scene.environment, 'None');
+    assert.deepEqual(expired.scene.spotlight, []);
+    assert.equal(Object.hasOwn(expired.scene.positions, 'AL'), false);
+});
+
+test('transaction commits automatic expiry while preserving freshly restated happenings', () => {
+    const before = state();
+    before.ct = 6;
+    before.meta.ct = 6;
+    before.actors.AL.doing = 'tied';
+    before.actors.AL.focus = 'old knot';
+    before.actors.AL.aware = ['The knot was cut'];
+    before.history = [{
+        ct: 3,
+        diff: { forward: [
+            { path: 'actors.AL.doing', before: 'walking', after: 'tied' },
+            { path: 'actors.AL.focus', before: 'hallway', after: 'old knot' },
+        ] },
+    }];
+    const result = applyTransaction(before, { version: 2, base: before.head, mode: 'NORMAL', tx: 'lease-refresh', ops: [
+        { op: 'actor.set', id: 'AL', set: { doing: 'stretching freed wrists' } },
+    ] }, { messageIdentity: 'lease-refresh-message', presentActorIds: ['AL'], now: 9 });
+
+    assert.equal(result.status, 'committed');
+    assert.equal(result.state.actors.AL.doing, 'stretching freed wrists');
+    assert.equal(Object.hasOwn(result.state.actors.AL, 'focus'), false);
+    assert.deepEqual(result.state.actors.AL.aware, ['The knot was cut']);
+    assert.ok(result.diff.forward.some((change) => change.path === 'actors.AL.focus' && change.after === undefined));
+});
+
+test('held happenings persist until replaced while one-turn happenings expire next turn', () => {
+    const before = state();
+    const marked = applyTransaction(before, { version: 2, base: before.head, mode: 'NORMAL', tx: 'lifetime-markers', ops: [
+        { op: 'actor.hold', id: 'AL', field: 'body', value: 'wrists tied' },
+        { op: 'actor.once', id: 'AL', field: 'doing', value: 'jerks against the rope' },
+    ] }, { messageIdentity: 'lifetime-markers-message', presentActorIds: ['AL'], now: 2 });
+    assert.equal(marked.status, 'committed');
+    assert.equal(marked.state.actors.AL.body, 'wrists tied');
+    assert.equal(marked.state.actors.AL.doing, 'jerks against the rope');
+
+    const next = applyTransaction(marked.state, { version: 2, base: marked.state.head, mode: 'NORMAL', tx: 'lifetime-next', ops: [] }, {
+        messageIdentity: 'lifetime-next-message', presentActorIds: ['AL'], now: 3,
+    });
+    assert.equal(next.status, 'committed');
+    assert.equal(next.state.actors.AL.body, 'wrists tied');
+    assert.equal(Object.hasOwn(next.state.actors.AL, 'doing'), false);
+
+    const released = applyTransaction(next.state, { version: 2, base: next.state.head, mode: 'NORMAL', tx: 'lifetime-release', ops: [
+        { op: 'actor.set', id: 'AL', field: 'body', value: 'wrists free' },
+    ] }, { messageIdentity: 'lifetime-release-message', presentActorIds: ['AL'], now: 4 });
+    assert.equal(released.status, 'committed');
+    assert.equal(released.state.actors.AL.body, 'wrists free');
+    assert.equal(Object.hasOwn(released.state.opaque.happeningLifetimes, 'actors.AL.body'), false);
 });
 
 test('clear validation rejects identity fields and unknown actors', () => {

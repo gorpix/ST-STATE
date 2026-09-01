@@ -78,6 +78,21 @@ scene.position.remove|AL
     ]);
 });
 
+test('parses explicit held and one-turn actor happenings', () => {
+    const result = extractHiddenPatch(`<!--ST_PATCH
+V2
+base=h-4
+mode=NORMAL
+actor.hold|AL|body|wrists tied behind the chair
+actor.once|AL|doing|jerks once against the rope
+-->`);
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.patch.ops, [
+        { op: 'actor.hold', id: 'AL', field: 'body', value: 'wrists tied behind the chair' },
+        { op: 'actor.once', id: 'AL', field: 'doing', value: 'jerks once against the rope' },
+    ]);
+});
+
 test('accepts legacy ct metadata without turning it into a state operation', () => {
     for (const ctLine of ['ct|3', 'ct=3']) {
         const text = `<!--ST_PATCH\nV2\nbase=h-2\nmode=NORMAL\n${ctLine}\nactor.set|AL|thoughts|Keep the door in view\n-->`;

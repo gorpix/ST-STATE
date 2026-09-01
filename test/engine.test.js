@@ -63,6 +63,29 @@ test('Hybrid Native commits an authoritative patch without a full legacy block',
     assert.equal(context.chatMetadata.stStateShadow, undefined);
 });
 
+test('Hybrid Native expires omitted stale happenings for present actors', async () => {
+    const { context, engine, store } = setup();
+    setChatMode(context.chatMetadata, 'NATIVE');
+    const before = store.load();
+    before.ct = 6;
+    before.meta.ct = 6;
+    before.actors.AL.at = 'beside the user';
+    before.actors.AL.doing = 'tied';
+    before.actors.AL.focus = 'the old knot';
+    before.actors.AL.aware = ['The knot has been cut'];
+    before.history = [{ ct: 3, diff: { forward: [
+        { path: 'actors.AL.doing', before: 'standing', after: 'tied' },
+        { path: 'actors.AL.focus', before: 'door', after: 'the old knot' },
+    ] } }];
+    store.save(before);
+    const message = { is_user: false, mes: 'Alice relaxes <!--ST_PATCH\nV2\nbase=GENESIS\nmode=NORMAL\ntx=expire-stale\n-->' };
+    const result = await engine.processAssistantMessage(message, { index: 0, messageIdentity: 'expire-stale-message' });
+    assert.equal(result.status, 'native_committed');
+    assert.equal(Object.hasOwn(store.load().actors.AL, 'doing'), false);
+    assert.equal(Object.hasOwn(store.load().actors.AL, 'focus'), false);
+    assert.deepEqual(store.load().actors.AL.aware, ['The knot has been cut']);
+});
+
 test('Hybrid Native commits Emotional Residue without a compatibility block', async () => {
     const { context, engine, store } = setup();
     setChatMode(context.chatMetadata, 'NATIVE');

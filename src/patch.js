@@ -24,6 +24,7 @@ function parseLinePatch(candidate) {
     const patch = { version: 2, base: '', mode: '', ops: [] };
     const creates = new Map();
     const actorSets = new Map();
+    const actorLifetimeSets = [];
     const actorClears = new Map();
     const sceneSet = {};
     const sceneClears = new Set();
@@ -54,11 +55,15 @@ function parseLinePatch(candidate) {
             patch.ct = claimedCt;
             continue;
         }
-        if (operation === 'actor.set' || operation === 'actor.create') {
+        if (['actor.set', 'actor.create', 'actor.hold', 'actor.once'].includes(operation)) {
             if (parts.length < 4) throw new Error(`Malformed ST_PATCH line: ${line}`);
             const id = parts[1].trim();
             const field = parts[2].trim();
             const value = lineValue(field, parts.slice(3).join('|'));
+            if (operation === 'actor.hold' || operation === 'actor.once') {
+                actorLifetimeSets.push({ op: operation, id, field, value });
+                continue;
+            }
             const target = operation === 'actor.create' ? creates : actorSets;
             if (!target.has(id)) target.set(id, {});
             target.get(id)[field] = value;
@@ -119,6 +124,7 @@ function parseLinePatch(candidate) {
     }
     for (const [id, actor] of creates) patch.ops.push({ op: 'actor.create', id, actor });
     for (const [id, set] of actorSets) patch.ops.push({ op: 'actor.set', id, set });
+    patch.ops.push(...actorLifetimeSets);
     for (const [id, fields] of actorClears) patch.ops.push({ op: 'actor.clear', id, fields: [...fields] });
     for (const relation of relationSets.values()) patch.ops.push({ op: 'relation.set', ...relation });
     for (const [id, set] of residueSets) patch.ops.push({ op: 'residue.set', id, set });
