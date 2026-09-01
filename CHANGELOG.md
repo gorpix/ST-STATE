@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.2-eval.2
+
+- Moved a required Native ST_PATCH tail latch after the local frame so prose cannot silently finish before its transaction.
+
 ## 0.4.2-eval.1
 
 - Added native Emotional Residue create, update, clear, remove, local-frame IDs, and Shadow parity.

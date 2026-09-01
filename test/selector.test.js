@@ -66,6 +66,9 @@ test('Hybrid Native injects local frame, authoritative patch rules, compatibilit
     assert.match(prompt.text, /Emotional Residue are native/);
     assert.match(prompt.text, /residue\.set\|RID\|field\|value/);
     assert.doesNotMatch(prompt.text, /Profiles, Emotional Residue, Quests/);
+    assert.match(prompt.text, /ST_OUTPUT_TAIL_LATCH v1/);
+    assert.match(prompt.text, /If output space becomes tight, shorten prose; never omit or truncate this tail/);
+    assert.match(prompt.text, /base=GENESIS\nmode=NORMAL\ntx=turn-1\n-->\nEND_ST_OUTPUT_TAIL_LATCH$/);
     assert.match(prompt.text, /exactly one complete hidden ST_PATCH/);
     assert.doesNotMatch(formatDicePool(prompt.selection, { rollProvider: () => 9 }), /US\|d20/);
     assert.doesNotMatch(formatDicePool(prompt.selection, { rollProvider: () => 9 }), /BO\|d20/);

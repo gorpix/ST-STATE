@@ -151,6 +151,20 @@ function compactJson(value) {
     return JSON.stringify(value).replace(/\u2028|\u2029/g, ' ');
 }
 
+function formatOutputTailLatch(selection) {
+    return [
+        'ST_OUTPUT_TAIL_LATCH v1',
+        'A NORMAL response is incomplete until its closed ST_PATCH has been emitted. Briefly shape the patch before prose, but serialize it only after prose. If output space becomes tight, shorten prose; never omit or truncate this tail. A zero-delta turn still emits the empty-safe tail below. Do not quote this reminder in visible prose.',
+        '<!--ST_PATCH',
+        'V2',
+        `base=${selection.meta.head}`,
+        'mode=NORMAL',
+        `tx=turn-${selection.meta.ct + 1}`,
+        '-->',
+        'END_ST_OUTPUT_TAIL_LATCH',
+    ].join('\n');
+}
+
 export function formatHotStatePack(selection) {
     const lines = ['ST_STATE_PACK v2', `META ${compactJson(selection.meta)}`, `SCENE ${compactJson(selection.scene)}`];
     for (const actor of Object.values(selection.actors ?? {})) lines.push(`ACTOR ${compactJson(actor)}`);
@@ -183,9 +197,9 @@ export function buildProtocolPrompt(state, options = {}) {
             'Compatibility fallback for unsupported domains only: if and only if Factions, relationship Profiles, Quests, Inventory, Chekhov, GM Notebook, DND, or World Sim changed, append one partial <internal_states> block with the next Turn header and only those changed sections. Omit every unchanged unsupported section. ST-STATE merges this fragment before applying the native patch.',
             'OOC and FLASH freeze state. A flash_handoff wins. They emit no legacy fragment; use an ST_PATCH envelope with mode=OOC or mode=FLASH when a route marker is needed.',
             'Place the compatibility fragment before ST_PATCH. Put ST_PATCH after GFX_END when a compatibility fragment exists. Optional ST_GFX follows ST_PATCH and remains the final control.',
-            `<!--ST_PATCH\nV2\nbase=${selection.meta.head}\nmode=NORMAL\ntx=turn-${selection.meta.ct + 1}\n-->`,
             dicePool,
             formatUnifiedLocalFrame(localFrame),
+            formatOutputTailLatch(selection),
         ];
         return { text: protocol.join('\n'), selection, localFrame, dicePool, mode };
     }
