@@ -6,7 +6,7 @@ ST-STATE is the state-engine half of ST-ENDGAME's transition to a required bundl
 
 The canonical state is one JSON document at `SillyTavern.getContext().chatMetadata.stState` for the currently selected chat. Per-chat mode configuration lives at `chatMetadata.stStateConfig`; the latest Shadow parity report is isolated at `chatMetadata.stStateShadow`; the bounded branch ledger and full pre-response checkpoints live at `chatMetadata.stStateBranches`. Global preferences live at `context.extensionSettings.stState` and are persisted through `saveSettingsDebounced()`.
 
-The state document is versioned (`schemaVersion: 2`) and includes the legacy sections (`meta`, `scene`, `actors`, `factions`, `relations`, `residue`, `quests`, `inventory`, `chekhov`, `thoughts`, `notebook`, `lastDnd`, `clocks`, `knowledge`, `commitments`, `artifacts`, `worldSim`, `opaque`, and `history`). Unknown legacy sections and World Sim are retained as opaque raw data. State returned from the store is cloned so dashboard code cannot mutate authority accidentally.
+The state document is versioned (`schemaVersion: 2`) and includes the legacy sections (`meta`, `scene`, `actors`, `factions`, `relations`, `residue`, `quests`, `inventory`, `chekhov`, `thoughts`, `notebook`, `lastDnd`, `clocks`, `knowledge`, `commitments`, `artifacts`, `worldSim`, `opaque`, and `history`). Unknown legacy sections and World Sim are retained as opaque raw data. State returned from the store is cloned so dashboard code cannot mutate authority accidentally. Migration strips `history` and `dedupe` roots from stored commit diffs so bookkeeping can never recursively embed itself.
 
 ## Transaction lifecycle
 

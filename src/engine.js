@@ -116,7 +116,12 @@ function stageNativeCompatibility(raw, state, { now, userName } = {}) {
 
 function includeCompatibilityInCommit(result, before) {
     if (result.status !== 'committed') return result;
-    const diff = makeDiff(before, result.state);
+    // applyTransaction has already appended its own bookkeeping. Exclude those
+    // roots or each history entry recursively embeds all preceding history.
+    const contentState = deepClone(result.state);
+    contentState.history = deepClone(before.history ?? []);
+    contentState.dedupe = deepClone(before.dedupe ?? []);
+    const diff = makeDiff(before, contentState);
     const history = [...(result.state.history ?? [])];
     const entry = history.at(-1);
     if (entry) {

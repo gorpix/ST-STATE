@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.0-eval.16
+
+- Stopped Native compatibility diffs from recursively embedding canonical history.
+- Automatically compacted already-expanded history records during state migration.
+
 ## 0.4.0-eval.15
 
 - Pruned oldest branch checkpoints automatically when the ledger reaches its storage cap.

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createEmptyState } from '../src/schema.js';
+import { createEmptyState, migrateState } from '../src/schema.js';
 import { applyDiff, applyTransaction } from '../src/reducer.js';
 import { validatePatchEnvelope } from '../src/validation.js';
 import { deepEqual } from '../src/util.js';
@@ -12,6 +12,30 @@ function state() {
     value.relations.pairs['US|AL'] = { a: 'US', b: 'AL', labelA: 'User', labelB: 'Alice', bond: 3, sparks: 1, grudge: 0 };
     return value;
 }
+
+test('state migration removes recursive bookkeeping while retaining real diffs', () => {
+    const before = state();
+    before.history = [{
+        ct: 3,
+        summary: 'legacy recursive entry',
+        diff: {
+            forward: [
+                { path: 'history', before: [], after: [{ nested: 'x'.repeat(5000) }] },
+                { path: 'dedupe', before: [], after: ['tx:old'] },
+                { path: 'actors.AL.doing', before: 'waiting', after: 'watching' },
+            ],
+            inverse: [
+                { path: 'history', before: [{ nested: 'x'.repeat(5000) }], after: [] },
+                { path: 'actors.AL.doing', before: 'watching', after: 'waiting' },
+            ],
+        },
+        ops: [{ op: 'actor.set', id: 'AL', set: { doing: 'watching' } }],
+    }];
+    const migrated = migrateState(before, { now: 2 });
+    assert.deepEqual(migrated.history[0].diff.forward.map((change) => change.path), ['actors.AL.doing']);
+    assert.deepEqual(migrated.history[0].diff.inverse.map((change) => change.path), ['actors.AL.doing']);
+    assert.equal(JSON.stringify(migrated.history).includes('nested'), false);
+});
 
 test('strict validation rejects arbitrary paths, unknown ops, bad ranges and IDs', () => {
     const result = validatePatchEnvelope({ version: 2, base: 'GENESIS', mode: 'NORMAL', ops: [{ op: 'state.set', path: 'actors.AL.name', value: 'x' }] }, { state: state() });

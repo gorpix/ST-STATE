@@ -98,6 +98,8 @@ test('Hybrid Native merges only changed unsupported compatibility sections befor
     assert.equal(Object.values(store.load().factions)[0].goal, 'Secure the gate');
     assert.doesNotMatch(message.mes, /internal_states|ST_PATCH|GFX_START|GFX_END/);
     assert.ok(result.diff.forward.some((change) => change.path.startsWith('factions.')));
+    assert.equal(result.diff.forward.some((change) => ['history', 'dedupe'].includes(change.path.split('.')[0])), false);
+    assert.equal(result.state.history.at(-1).diff.forward.some((change) => ['history', 'dedupe'].includes(change.path.split('.')[0])), false);
 });
 
 test('Hybrid Native rejects malformed and stale patches without changing canonical state', async () => {

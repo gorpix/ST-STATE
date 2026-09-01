@@ -32,6 +32,27 @@ function safeRecord(value) {
     return result;
 }
 
+function compactHistoryDiff(diff) {
+    if (!isPlainObject(diff)) return { forward: [], inverse: [] };
+    const compact = (changes) => (Array.isArray(changes) ? changes : [])
+        .filter((change) => isPlainObject(change) && typeof change.path === 'string')
+        .filter((change) => !['history', 'dedupe'].includes(change.path.split('.')[0]))
+        .slice(0, 500)
+        .map((change) => deepClone(change));
+    return { forward: compact(diff.forward), inverse: compact(diff.inverse) };
+}
+
+export function compactCanonicalHistory(history) {
+    if (!Array.isArray(history)) return [];
+    return history.slice(-MAX_HISTORY).map((entry) => {
+        if (!isPlainObject(entry)) return { summary: sanitizePlainText(entry, { maxLength: 1000 }) };
+        const compact = deepClone(entry);
+        if (isPlainObject(entry.diff)) compact.diff = compactHistoryDiff(entry.diff);
+        if (Array.isArray(compact.ops)) compact.ops = compact.ops.slice(0, 50);
+        return compact;
+    });
+}
+
 export function relationKey(left, right) {
     return `${normalizeActorId(left)}|${normalizeActorId(right)}`;
 }
@@ -277,7 +298,7 @@ export function normalizeState(input, fallback = createEmptyState()) {
         }
         state.opaque.legacy.actorIds = actorIds;
     }
-    state.history = Array.isArray(raw.history) ? raw.history.slice(-MAX_HISTORY).map((entry) => deepClone(entry)) : [];
+    state.history = compactCanonicalHistory(raw.history);
     state.dedupe = Array.isArray(raw.dedupe) ? raw.dedupe.slice(-MAX_HISTORY).map((entry) => String(entry)) : [];
     state.branches = isPlainObject(raw.branches) ? deepClone(raw.branches) : state.branches;
     // Preserve root fields introduced by a future schema instead of silently dropping them.
