@@ -20,7 +20,7 @@ The state document is versioned (`schemaVersion: 2`) and includes the legacy sec
 
 ## Branch lifecycle
 
-`MESSAGE_SWIPED` fires after SillyTavern loads the selected `swipe_id` and before a newly requested swipe begins generation. ST-STATE atomically restores the slot's full pre-response checkpoint and branch ledger. If the selected swipe already contains a complete state at `checkpoint.ct + 1`, that state becomes authoritative; otherwise the checkpoint remains authoritative for the pending generation or frozen response. `MESSAGE_EDITED`, `MESSAGE_DELETED`, and `MESSAGE_SWIPE_DELETED` invalidate affected ledger entries and rebaseline or roll back without incrementing `ct`. Manual rebaseline, clear, and previous-state restore are explicit and backup-gated in the settings UI.
+`MESSAGE_SWIPED` fires after SillyTavern loads the selected `swipe_id` and before a newly requested swipe begins generation. ST-STATE atomically restores the slot's full pre-response checkpoint and branch ledger. If the selected swipe already contains a complete state at `checkpoint.ct + 1`, that state becomes authoritative; otherwise the checkpoint remains authoritative for the pending generation or frozen response. `MESSAGE_EDITED`, `MESSAGE_DELETED`, and `MESSAGE_SWIPE_DELETED` invalidate affected ledger entries and rebaseline or roll back without incrementing `ct`. When duplicated full checkpoints approach the metadata cap, persistence prunes the oldest slots while retaining the newest slot; older branches remain reconstructable from chat history. Manual rebaseline, clear, and previous-state restore are explicit and backup-gated in the settings UI.
 
 ## Modes
 

@@ -7,6 +7,7 @@ import {
     createBranchLedger,
     invalidateAssistantDelete,
     invalidateAssistantEdit,
+    fitBranchLedgerSize,
     normalizeBranchLedger,
     recordAssistantSwipeResult,
     selectAssistantSwipe,
@@ -99,6 +100,21 @@ test('full-state checkpoints retain only the newest bounded assistant slots', ()
         ledger = checkpointAssistantSlot(ledger, { slotId: `slot:${index}`, messageId: `m${index}`, index, state: state(), at: index }).ledger;
     }
     assert.deepEqual(Object.keys(ledger.slots).sort(), ['slot:2', 'slot:3']);
+});
+
+test('oversized multi-slot ledgers prune oldest checkpoints while retaining the current slot', () => {
+    let ledger = createBranchLedger({ maxSlots: 6 });
+    for (let index = 0; index < 6; index += 1) {
+        const checkpoint = state();
+        checkpoint.opaque.unknownRoot.payload = `${index}:` + 'x'.repeat(900);
+        ledger = checkpointAssistantSlot(ledger, { slotId: `slot:${index}`, messageId: `m${index}`, index, state: checkpoint, at: index }).ledger;
+    }
+    ledger = selectAssistantSwipe(ledger, { slotId: 'slot:0', messageId: 'm0', swipeIndex: 0, at: 100 }).ledger;
+    const fitted = fitBranchLedgerSize(ledger, { limit: 4000 });
+    assert.ok(fitted.removedSlotIds.length > 0);
+    assert.equal(Object.hasOwn(fitted.ledger.slots, 'slot:0'), true);
+    assert.equal(Object.hasOwn(fitted.ledger.slots, 'slot:1'), false);
+    assert.ok(fitted.size <= 4000);
 });
 
 test('replaying an identical host event is idempotent by deterministic event ID', () => {

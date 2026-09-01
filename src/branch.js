@@ -152,6 +152,39 @@ export function assertBranchLedgerSize(input, limit = MAX_BRANCH_LEDGER_CHARS) {
     return size;
 }
 
+/**
+ * Fit persisted branch data under its storage cap by dropping only the oldest
+ * assistant slots. The newest/current slot is retained so generation can
+ * continue; older missing checkpoints remain reconstructable from chat.
+ */
+export function fitBranchLedgerSize(input, { limit = MAX_BRANCH_LEDGER_CHARS, preserveSlotId = '' } = {}) {
+    const ledger = normalizeBranchLedger(input);
+    const protectedSlotId = preserveSlotId || text(ledger.events.at(-1)?.slotId);
+    const retained = () => JSON.stringify(ledger).length;
+    let size = retained();
+    const removedSlotIds = [];
+    const candidates = Object.values(ledger.slots).sort((left, right) => {
+        const leftPreserved = left.slotId === protectedSlotId ? 1 : 0;
+        const rightPreserved = right.slotId === protectedSlotId ? 1 : 0;
+        if (leftPreserved !== rightPreserved) return leftPreserved - rightPreserved;
+        const leftInactive = left.status === 'active' ? 1 : 0;
+        const rightInactive = right.status === 'active' ? 1 : 0;
+        if (leftInactive !== rightInactive) return leftInactive - rightInactive;
+        if (left.index !== right.index) return left.index - right.index;
+        return Number(left.history.at(-1)?.at ?? 0) - Number(right.history.at(-1)?.at ?? 0);
+    });
+    while (size > limit && Object.keys(ledger.slots).length > 1) {
+        const oldest = candidates.shift();
+        if (!oldest) break;
+        delete ledger.slots[oldest.slotId];
+        ledger.events = ledger.events.filter((event) => event?.slotId !== oldest.slotId);
+        removedSlotIds.push(oldest.slotId);
+        size = retained();
+    }
+    if (size > limit) throw new RangeError(`Branch checkpoint ledger is too large (${size} > ${limit} characters)`);
+    return { ledger, size, removedSlotIds };
+}
+
 /** Return the newest retained pre-response checkpoint. */
 export function latestAssistantCheckpoint(input, options = {}) {
     const ledger = normalizeBranchLedger(input, options);
@@ -290,8 +323,10 @@ export function recordAssistantSwipeResult(input, options = {}) {
     swipe.commitHead = text(options.state?.head);
     swipe.diff = Array.isArray(options.diff) ? deepClone(options.diff).slice(0, 500) : [];
     const event = recordEvent(ledger, slot, 'swipe_result', { swipeId: swipe.id, mode: swipe.commitMode, ct: swipe.commitCt }, options.at);
-    assertBranchLedgerSize(ledger);
-    return { ...checkpointResult(ledger, slot, swipe), ok: true, event };
+    const fitted = fitBranchLedgerSize(ledger, { preserveSlotId: slotId });
+    const retainedSlot = fitted.ledger.slots[slotId];
+    const retainedSwipe = retainedSlot?.swipes?.[swipe.id] ?? swipe;
+    return { ...checkpointResult(fitted.ledger, retainedSlot ?? slot, retainedSwipe), ok: true, event, prunedSlots: fitted.removedSlotIds };
 }
 
 /**

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.0-eval.15
+
+- Pruned oldest branch checkpoints automatically when the ledger reaches its storage cap.
+- Accepted object-shaped and mixed-delimiter legacy VAD, clamped numeric ranges, and ignored unusable VAD without rejecting other valid changes.
+
 ## 0.4.0-eval.14
 
 - Accepted advisory legacy `ct` patch lines and routed actor `thoughts` into canonical Native state.

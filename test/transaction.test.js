@@ -124,20 +124,31 @@ test('legacy actor thoughts update the canonical thoughts collection and ct meta
     assert.equal(Object.hasOwn(committed.state.actors.AL, 'thoughts'), false);
 });
 
-test('legacy vad compatibility remains strict and unambiguous', () => {
+test('legacy vad compatibility accepts old shapes, clamps ranges, and ignores unusable composites', () => {
     const before = state();
-    for (const vad of ['+2/+1', '+2/hot/-1', '+3/+1/-1', '+2/+1,-1']) {
+    for (const vad of ['+2/+1', '+2/hot/-1']) {
+        const result = validatePatchEnvelope({ version: 2, base: before.head, mode: 'NORMAL', ops: [
+            { op: 'actor.set', id: 'AL', set: { vad, doing: 'still valid' } },
+        ] }, { state: before });
+        assert.equal(result.ok, true);
+        assert.deepEqual(result.value.ops[0].set, { doing: 'still valid' });
+    }
+    for (const [vad, expected] of [
+        ['+3/+1,-4', { valence: 2, arousal: 1, dominance: -2 }],
+        [{ v: 1, a: 0, d: -1 }, { valence: 1, arousal: 0, dominance: -1 }],
+        [{ valence: -1, arousal: 2, dominance: 0 }, { valence: -1, arousal: 2, dominance: 0 }],
+    ]) {
         const result = validatePatchEnvelope({ version: 2, base: before.head, mode: 'NORMAL', ops: [
             { op: 'actor.set', id: 'AL', field: 'vad', value: vad },
         ] }, { state: before });
-        assert.equal(result.ok, false);
-        assert.ok(result.errors.some((error) => /legacy vad/.test(error)));
+        assert.equal(result.ok, true);
+        assert.deepEqual(result.value.ops[0].set, expected);
     }
     const mixed = validatePatchEnvelope({ version: 2, base: before.head, mode: 'NORMAL', ops: [
         { op: 'actor.set', id: 'AL', set: { vad: '+2/+1/-1', valence: 0 } },
     ] }, { state: before });
-    assert.equal(mixed.ok, false);
-    assert.ok(mixed.errors.some((error) => /cannot be combined/.test(error)));
+    assert.equal(mixed.ok, true);
+    assert.deepEqual(mixed.value.ops[0].set, { valence: 0, arousal: 1, dominance: -1 });
     const duplicateAlias = validatePatchEnvelope({ version: 2, base: before.head, mode: 'NORMAL', ops: [
         { op: 'actor.set', id: 'AL', set: { vad: '+2/+1/-1', VAD: '+1/0/-2' } },
     ] }, { state: before });

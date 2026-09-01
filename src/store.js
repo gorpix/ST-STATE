@@ -1,7 +1,7 @@
 import { createEmptyState, EXTENSION_KEY, migrateState } from './schema.js';
 import { makeDiff } from './reducer.js';
 import { SHADOW_SIDECAR_KEY } from './modes.js';
-import { assertBranchLedgerSize, BRANCH_SIDECAR_KEY, createBranchLedger, normalizeBranchLedger } from './branch.js';
+import { BRANCH_SIDECAR_KEY, createBranchLedger, fitBranchLedgerSize, normalizeBranchLedger } from './branch.js';
 import { deepClone, stableHash, stableStringify } from './util.js';
 
 export class ChatSwitchError extends Error {
@@ -114,8 +114,7 @@ export class ChatStore {
         const metadata = this.metadata();
         if (enforceChatIdentity && currentChatId(this.host) !== beforeId) throw new ChatSwitchError();
         const previous = hasMetadata(metadata, BRANCH_SIDECAR_KEY) ? deepClone(metadata[BRANCH_SIDECAR_KEY]) : undefined;
-        const normalized = normalizeBranchLedger(ledger);
-        assertBranchLedgerSize(normalized);
+        const normalized = fitBranchLedgerSize(ledger).ledger;
         metadata[BRANCH_SIDECAR_KEY] = deepClone(normalized);
         try {
             if (enforceChatIdentity && currentChatId(this.host) !== beforeId) throw new ChatSwitchError();
@@ -139,8 +138,7 @@ export class ChatStore {
         const previousBranches = hasMetadata(metadata, BRANCH_SIDECAR_KEY) ? deepClone(metadata[BRANCH_SIDECAR_KEY]) : undefined;
         const previousReport = hasMetadata(metadata, SHADOW_SIDECAR_KEY) ? deepClone(metadata[SHADOW_SIDECAR_KEY]) : undefined;
         const normalizedState = migrateState(state, { now: this.now() });
-        const normalizedBranches = normalizeBranchLedger(ledger);
-        assertBranchLedgerSize(normalizedBranches);
+        const normalizedBranches = fitBranchLedgerSize(ledger).ledger;
         metadata[this.key] = deepClone(normalizedState);
         metadata[BRANCH_SIDECAR_KEY] = deepClone(normalizedBranches);
         if (report !== undefined) metadata[SHADOW_SIDECAR_KEY] = nextShadowSidecar(previousReport, report);

@@ -88,24 +88,23 @@ function normalizeLegacyVad(value, path, errors) {
     let parts;
     if (Array.isArray(value)) {
         parts = value;
+    } else if (isPlainObject(value)) {
+        parts = hasOwn(value, 'valence') || hasOwn(value, 'arousal') || hasOwn(value, 'dominance')
+            ? [value.valence, value.arousal, value.dominance]
+            : [value.v, value.a, value.d];
     } else if (typeof value === 'string') {
         const source = value.trim().replace(/^([\[(])\s*/, '').replace(/\s*([\])])$/, '');
-        const delimited = source.match(/^([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s*([/,|])\s*([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s*\2\s*([+-]?(?:\d+(?:\.\d+)?|\.\d+))$/);
-        const spaced = source.match(/^([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s+([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s+([+-]?(?:\d+(?:\.\d+)?|\.\d+))$/);
-        parts = delimited ? [delimited[1], delimited[3], delimited[4]] : spaced ? spaced.slice(1) : null;
+        const numbers = source.match(/[+-]?(?:\d+(?:\.\d+)?|\.\d+)/g) ?? [];
+        parts = numbers.length === 3 ? numbers : null;
     } else {
         parts = null;
     }
     if (!parts || parts.length !== VAD_COMPONENT_FIELDS.length) {
-        fail(errors, path, 'legacy vad must contain exactly three numeric valence/arousal/dominance components');
         return null;
     }
     const numbers = parts.map((part) => typeof part === 'number' ? part : (/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/.test(String(part).trim()) ? Number(part) : Number.NaN));
-    if (numbers.some((number) => !Number.isFinite(number) || number < -2 || number > 2)) {
-        fail(errors, path, 'legacy vad components must each be finite numbers from -2 through 2');
-        return null;
-    }
-    return Object.fromEntries(VAD_COMPONENT_FIELDS.map((field, index) => [field, numbers[index]]));
+    if (numbers.some((number) => !Number.isFinite(number))) return null;
+    return Object.fromEntries(VAD_COMPONENT_FIELDS.map((field, index) => [field, Math.max(-2, Math.min(2, numbers[index]))]));
 }
 
 function assignActorField(fields, field, value, path, errors) {
@@ -273,12 +272,12 @@ function normalizeOperation(operation, index, knownActors, errors, state = null)
         const fields = {};
         if (hasSet && isPlainObject(setValue)) {
             const entries = prepareFieldEntries(setValue, canonicalActorField, path, errors);
-            const hasLegacyVad = entries.some((entry) => entry.canonical === 'vad');
-            if (hasLegacyVad && entries.some((entry) => VAD_COMPONENT_FIELDS.includes(entry.canonical))) {
-                fail(errors, path, 'legacy vad cannot be combined with valence, arousal, or dominance in the same operation');
-            }
-            for (const entry of entries) {
-                if (hasLegacyVad && VAD_COMPONENT_FIELDS.includes(entry.canonical)) continue;
+            const ordered = [
+                ...entries.filter((entry) => entry.canonical === 'vad'),
+                ...entries.filter((entry) => entry.canonical !== 'vad' && !VAD_COMPONENT_FIELDS.includes(entry.canonical)),
+                ...entries.filter((entry) => VAD_COMPONENT_FIELDS.includes(entry.canonical)),
+            ];
+            for (const entry of ordered) {
                 assignActorField(fields, entry.field, entry.value, `${path}.set.${entry.field}`, errors);
             }
         }
@@ -297,13 +296,13 @@ function normalizeOperation(operation, index, knownActors, errors, state = null)
         const actor = {};
         if (isPlainObject(actorInput)) {
             const entries = prepareFieldEntries(actorInput, canonicalActorField, path, errors);
-            const hasLegacyVad = entries.some((entry) => entry.canonical === 'vad');
-            if (hasLegacyVad && entries.some((entry) => VAD_COMPONENT_FIELDS.includes(entry.canonical))) {
-                fail(errors, path, 'legacy vad cannot be combined with valence, arousal, or dominance in the same operation');
-            }
-            for (const entry of entries) {
+            const ordered = [
+                ...entries.filter((entry) => entry.canonical === 'vad'),
+                ...entries.filter((entry) => entry.canonical !== 'vad' && !VAD_COMPONENT_FIELDS.includes(entry.canonical)),
+                ...entries.filter((entry) => VAD_COMPONENT_FIELDS.includes(entry.canonical)),
+            ];
+            for (const entry of ordered) {
                 if (normalizeFieldTerm(entry.field) === 'id') fail(errors, `${path}.actor.${entry.field}`, 'actor ID is supplied by the operation');
-                if (hasLegacyVad && VAD_COMPONENT_FIELDS.includes(entry.canonical)) continue;
                 assignActorField(actor, entry.field, entry.value, `${path}.actor.${entry.field}`, errors);
             }
             if (!actorAlreadyExists && (!hasOwn(actor, 'name') || !actor.name)) fail(errors, `${path}.actor.name`, 'is required');
