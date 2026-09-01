@@ -91,6 +91,15 @@ function applyOperations(state, operations) {
                 if (field === 'thoughts') setActorThoughts(operation.id, value);
                 else actor[field] = deepClone(value);
             }
+        } else if (operation.op === 'actor.clear') {
+            const actor = result.actors[operation.id];
+            if (!isPlainObject(actor)) throw new Error(`Actor ${operation.id} does not exist`);
+            for (const field of operation.fields) {
+                if (field === 'location') for (const alias of ['at', 'location', 'position']) delete actor[alias];
+                else if (field === 'activity') for (const alias of ['doing', 'activity']) delete actor[alias];
+                else if (field === 'thoughts') setActorThoughts(operation.id, 'None');
+                else delete actor[field];
+            }
         } else if (operation.op === 'actor.create') {
             if (hasOwn(result.actors, operation.id)) throw new Error(`Actor ${operation.id} already exists`);
             const actor = deepClone(operation.actor);
@@ -100,6 +109,11 @@ function applyOperations(state, operations) {
             if (thoughts !== undefined) setActorThoughts(operation.id, thoughts);
         } else if (operation.op === 'scene.set') {
             for (const [field, value] of Object.entries(operation.set)) result.scene[field] = deepClone(value);
+        } else if (operation.op === 'scene.clear') {
+            const defaults = { spotlight: [], openBeat: 'None', timePressure: 'None', environment: 'None', positions: {}, time: '' };
+            for (const field of operation.fields) result.scene[field] = deepClone(defaults[field]);
+        } else if (operation.op === 'scene.position.remove') {
+            delete result.scene.positions[operation.id];
         } else if (operation.op === 'relation.set') {
             const key = relationKey(operation.a, operation.b);
             if (!isPlainObject(result.relations?.pairs)) result.relations = { pairs: {}, profiles: {} };

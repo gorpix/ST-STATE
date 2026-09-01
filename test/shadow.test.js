@@ -86,6 +86,19 @@ test('residue claims compare native actor IDs with legacy actor names', () => {
     assert.ok(!report.unsupportedDomains.includes('residue'));
 });
 
+test('semantic clear claims compare absent actor facts and removed positions', () => {
+    const authoritative = createEmptyState({ now: 1 });
+    authoritative.ct = 1; authoritative.meta.ct = 1;
+    authoritative.actors.AL = { id: 'AL', name: 'Alice' };
+    const candidate = structuredClone(authoritative);
+    const patch = { ops: [
+        { op: 'actor.clear', id: 'AL', fields: ['activity', 'focus'] },
+        { op: 'scene.position.remove', id: 'AL' },
+    ] };
+    assert.deepEqual(shadowClaimedPaths(patch), ['actors.AL.activity', 'actors.AL.focus', 'ct', 'scene.positions.AL']);
+    assert.equal(compareShadowParity(authoritative, candidate, { patch }).status, 'match');
+});
+
 test('legacy punctuation variants match while changed words still diverge', () => {
     const authoritative = createEmptyState({ now: 1 });
     authoritative.ct = 2; authoritative.meta.ct = 2;

@@ -18,8 +18,11 @@ export class PatchValidationError extends Error {
 
 const ENVELOPE_KEYS = new Set(['version', 'base', 'head', 'mode', 'ops', 'ct', 'tx', 'id', 'transactionId', 'messageId']);
 const ACTOR_OP_KEYS = new Set(['op', 'id', 'field', 'value', 'set', 'fields']);
+const ACTOR_CLEAR_OP_KEYS = new Set(['op', 'id', 'field', 'fields']);
 const CREATE_OP_KEYS = new Set(['op', 'id', 'actor', 'set', 'fields']);
 const SCENE_OP_KEYS = new Set(['op', 'field', 'value', 'set', 'fields']);
+const SCENE_CLEAR_OP_KEYS = new Set(['op', 'field', 'fields']);
+const SCENE_POSITION_REMOVE_OP_KEYS = new Set(['op', 'id']);
 const RELATION_OP_KEYS = new Set(['op', 'a', 'b', 'field', 'value', 'set', 'fields']);
 const RESIDUE_SET_OP_KEYS = new Set(['op', 'id', 'field', 'value', 'set', 'fields']);
 const RESIDUE_REMOVE_OP_KEYS = new Set(['op', 'id']);
@@ -74,6 +77,32 @@ function canonicalActorField(field) {
 
 function canonicalSceneField(field) {
     return SCENE_FIELD_ALIASES.get(normalizeFieldTerm(field));
+}
+
+function canonicalActorClearField(field) {
+    const canonical = canonicalActorField(field);
+    if (['at', 'location', 'position'].includes(canonical)) return 'location';
+    if (['doing', 'activity'].includes(canonical)) return 'activity';
+    return canonical;
+}
+
+const NON_CLEARABLE_ACTOR_FIELDS = new Set(['id', 'name', 'displayName']);
+
+function clearFields(operation, path, allowedKeys, resolver, errors) {
+    checkKeys(operation, allowedKeys, path, errors);
+    if (hasOwn(operation, 'field') && hasOwn(operation, 'fields')) fail(errors, path, 'use either field or fields, not both');
+    const raw = hasOwn(operation, 'fields') ? operation.fields : [operation.field];
+    if (!Array.isArray(raw) || raw.length === 0) {
+        fail(errors, `${path}.fields`, 'must contain at least one field');
+        return [];
+    }
+    const fields = [];
+    for (const [fieldIndex, field] of raw.entries()) {
+        const canonical = resolver(field);
+        if (!canonical) fail(errors, `${path}.fields[${fieldIndex}]`, `field "${field}" is not allowlisted`);
+        else if (!fields.includes(canonical)) fields.push(canonical);
+    }
+    return fields;
 }
 
 function prepareFieldEntries(value, resolver, path, errors) {
@@ -331,6 +360,19 @@ function normalizeOperation(operation, index, knownActors, errors, state = null)
         if (actorAlreadyExists) return { op: 'actor.set', id: operation.id, set: actor };
         return { op: operation.op, id: operation.id, actor };
     }
+    if (operation.op === 'actor.clear') {
+        if (!isValidActorId(operation.id)) fail(errors, `${path}.id`, 'must be a two-letter uppercase actor ID');
+        else if (!knownActors.has(operation.id)) fail(errors, `${path}.id`, 'actor does not exist in the base state');
+        const fields = clearFields(operation, path, ACTOR_CLEAR_OP_KEYS, canonicalActorClearField, errors)
+            .filter((field) => {
+                if (NON_CLEARABLE_ACTOR_FIELDS.has(field)) {
+                    fail(errors, path, `field "${field}" cannot be cleared`);
+                    return false;
+                }
+                return true;
+            });
+        return { op: operation.op, id: operation.id, fields };
+    }
     if (operation.op === 'scene.set') {
         const { hasSet, hasField, setValue } = extractOperationFields(operation, path, SCENE_OP_KEYS, errors);
         const set = {};
@@ -344,6 +386,16 @@ function normalizeOperation(operation, index, knownActors, errors, state = null)
             assignSceneField(set, operation.field, operation.value, `${path}.value`, errors, state);
         }
         return { op: operation.op, set };
+    }
+    if (operation.op === 'scene.clear') {
+        const fields = clearFields(operation, path, SCENE_CLEAR_OP_KEYS, canonicalSceneField, errors);
+        return { op: operation.op, fields };
+    }
+    if (operation.op === 'scene.position.remove') {
+        checkKeys(operation, SCENE_POSITION_REMOVE_OP_KEYS, path, errors);
+        if (!isValidActorId(operation.id)) fail(errors, `${path}.id`, 'must be a two-letter uppercase actor ID');
+        else if (!knownActors.has(operation.id)) fail(errors, `${path}.id`, 'actor does not exist in the base state');
+        return { op: operation.op, id: operation.id };
     }
     if (operation.op === 'relation.set') {
         const { hasSet, hasField, setValue } = extractOperationFields(operation, path, RELATION_OP_KEYS, errors);

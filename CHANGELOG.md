@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.2-eval.3
+
+- Added native actor/scene clear operations and a final-beat freshness audit to remove facts that stopped being true.
+
 ## 0.4.2-eval.2
 
 - Moved a required Native ST_PATCH tail latch after the local frame so prose cannot silently finish before its transaction.

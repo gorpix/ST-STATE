@@ -24,8 +24,11 @@ function parseLinePatch(candidate) {
     const patch = { version: 2, base: '', mode: '', ops: [] };
     const creates = new Map();
     const actorSets = new Map();
+    const actorClears = new Map();
     const sceneSet = {};
+    const sceneClears = new Set();
     const positions = {};
+    const positionRemovals = new Set();
     const relationSets = new Map();
     const residueSets = new Map();
     const residueRemovals = new Set();
@@ -61,6 +64,13 @@ function parseLinePatch(candidate) {
             target.get(id)[field] = value;
             continue;
         }
+        if (operation === 'actor.clear') {
+            if (parts.length !== 3) throw new Error(`Malformed ST_PATCH line: ${line}`);
+            const id = parts[1].trim();
+            if (!actorClears.has(id)) actorClears.set(id, new Set());
+            actorClears.get(id).add(parts[2].trim());
+            continue;
+        }
         if (operation === 'scene.set') {
             if (parts.length < 3) throw new Error(`Malformed ST_PATCH line: ${line}`);
             const field = parts[1].trim();
@@ -70,6 +80,16 @@ function parseLinePatch(candidate) {
         if (operation === 'scene.position') {
             if (parts.length < 3) throw new Error(`Malformed ST_PATCH line: ${line}`);
             positions[parts[1].trim()] = parts.slice(2).join('|').trim();
+            continue;
+        }
+        if (operation === 'scene.clear') {
+            if (parts.length !== 2) throw new Error(`Malformed ST_PATCH line: ${line}`);
+            sceneClears.add(parts[1].trim());
+            continue;
+        }
+        if (operation === 'scene.position.remove') {
+            if (parts.length !== 2) throw new Error(`Malformed ST_PATCH line: ${line}`);
+            positionRemovals.add(parts[1].trim());
             continue;
         }
         if (operation === 'relation.set') {
@@ -99,11 +119,14 @@ function parseLinePatch(candidate) {
     }
     for (const [id, actor] of creates) patch.ops.push({ op: 'actor.create', id, actor });
     for (const [id, set] of actorSets) patch.ops.push({ op: 'actor.set', id, set });
+    for (const [id, fields] of actorClears) patch.ops.push({ op: 'actor.clear', id, fields: [...fields] });
     for (const relation of relationSets.values()) patch.ops.push({ op: 'relation.set', ...relation });
     for (const [id, set] of residueSets) patch.ops.push({ op: 'residue.set', id, set });
     for (const id of residueRemovals) patch.ops.push({ op: 'residue.remove', id });
     if (Object.keys(positions).length) sceneSet.positions = positions;
     if (Object.keys(sceneSet).length) patch.ops.push({ op: 'scene.set', set: sceneSet });
+    if (sceneClears.size) patch.ops.push({ op: 'scene.clear', fields: [...sceneClears] });
+    for (const id of positionRemovals) patch.ops.push({ op: 'scene.position.remove', id });
     return patch;
 }
 

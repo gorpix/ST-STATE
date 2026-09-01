@@ -12,7 +12,7 @@ import { BRANCH_SIDECAR_KEY, checkpointAssistantSlot, createBranchLedger, invali
 import { EXTENSION_KEY } from './schema.js';
 import { SHADOW_SIDECAR_KEY } from './modes.js';
 import { extractGfxProtocol, GFX_MEDIA_KINDS, removeGfxControl } from './gfx.js';
-import { createGfxOverlay } from './gfx-overlay.js?v=0.4.2-eval.2';
+import { createGfxOverlay } from './gfx-overlay.js?v=0.4.2-eval.3';
 import { applyDiff } from './reducer.js';
 
 export const runtimeState = {

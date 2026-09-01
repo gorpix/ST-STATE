@@ -209,6 +209,41 @@ test('NORMAL actor/scene operations commit atomically and increment ct once', ()
     assert.equal(reverted.scene.openBeat, before.scene.openBeat);
 });
 
+test('actor and scene clears remove stale happenings and semantic aliases', () => {
+    const before = state();
+    before.actors.AL.doing = 'holding the door';
+    before.actors.AL.activity = 'guarding the old room';
+    before.actors.AL.focus = 'the completed ritual';
+    before.scene.openBeat = 'The ritual is underway';
+    before.scene.timePressure = 'Before the ritual ends';
+    before.scene.positions.AL = 'beside the old door';
+    const result = applyTransaction(before, { version: 2, base: before.head, mode: 'NORMAL', tx: 'clear-stale', ops: [
+        { op: 'actor.clear', id: 'AL', fields: ['doing', 'focus'] },
+        { op: 'scene.clear', fields: ['openBeat', 'timePressure'] },
+        { op: 'scene.position.remove', id: 'AL' },
+    ] }, { messageIdentity: 'clear-stale-message', now: 2 });
+    assert.equal(result.status, 'committed');
+    assert.equal(Object.hasOwn(result.state.actors.AL, 'doing'), false);
+    assert.equal(Object.hasOwn(result.state.actors.AL, 'activity'), false);
+    assert.equal(Object.hasOwn(result.state.actors.AL, 'focus'), false);
+    assert.equal(result.state.scene.openBeat, 'None');
+    assert.equal(result.state.scene.timePressure, 'None');
+    assert.equal(Object.hasOwn(result.state.scene.positions, 'AL'), false);
+});
+
+test('clear validation rejects identity fields and unknown actors', () => {
+    const before = state();
+    const identity = validatePatchEnvelope({ version: 2, base: before.head, mode: 'NORMAL', ops: [
+        { op: 'actor.clear', id: 'AL', field: 'name' },
+    ] }, { state: before });
+    assert.equal(identity.ok, false);
+    assert.ok(identity.errors.some((error) => /cannot be cleared/.test(error)));
+    const unknown = validatePatchEnvelope({ version: 2, base: before.head, mode: 'NORMAL', ops: [
+        { op: 'scene.position.remove', id: 'ZZ' },
+    ] }, { state: before });
+    assert.equal(unknown.ok, false);
+});
+
 test('relation updates validate ranges and commit atomically', () => {
     const before = state();
     const patch = { version: 2, base: before.head, mode: 'NORMAL', tx: 'relation-turn', ops: [

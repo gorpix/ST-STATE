@@ -145,6 +145,8 @@ export function shadowClaimedPaths(patch) {
     for (const operation of patch?.ops ?? []) {
         if (operation?.op === 'actor.set') {
             for (const field of Object.keys(operation.set ?? {})) paths.add(actorComparablePath(operation.id, field));
+        } else if (operation?.op === 'actor.clear') {
+            for (const field of operation.fields ?? []) paths.add(actorComparablePath(operation.id, field));
         } else if (operation?.op === 'actor.create') {
             paths.add(`actors.${operation.id}.id`);
             for (const field of Object.keys(operation.actor ?? {})) paths.add(actorComparablePath(operation.id, field));
@@ -154,6 +156,10 @@ export function shadowClaimedPaths(patch) {
                     for (const id of Object.keys(value)) paths.add(`scene.positions.${id}`);
                 } else paths.add(`scene.${field}`);
             }
+        } else if (operation?.op === 'scene.clear') {
+            for (const field of operation.fields ?? []) paths.add(`scene.${field}`);
+        } else if (operation?.op === 'scene.position.remove') {
+            paths.add(`scene.positions.${operation.id}`);
         } else if (operation?.op === 'relation.set') {
             for (const field of Object.keys(operation.set ?? {})) paths.add(`relations.pairs.${operation.a}|${operation.b}.${field}`);
         } else if (operation?.op === 'residue.set' || operation?.op === 'residue.remove') {
