@@ -1,22 +1,10 @@
 # Changelog
 
-## 0.4.2-eval.4
+## 0.4.3
 
-- Included actor-positioned participants when sparse scene positions omit them.
-- Made actor location/activity setters replace stale aliases instead of leaving older values with display priority.
-
-## 0.4.2-eval.3
-
-- Added native actor/scene clear operations and a final-beat freshness audit to remove facts that stopped being true.
-
-## 0.4.2-eval.2
-
-- Moved a required Native ST_PATCH tail latch after the local frame so prose cannot silently finish before its transaction.
-
-## 0.4.2-eval.1
-
-- Added native Emotional Residue create, update, clear, remove, local-frame IDs, and Shadow parity.
-- Removed Emotional Residue from Native compatibility fragments.
+- Added native Emotional Residue updates, derived local-frame IDs, and Shadow parity.
+- Added reliable patch-tail enforcement plus semantic actor/scene clearing.
+- Included positioned participants in freshness checks and replaced stale location/activity aliases atomically.
 
 ## 0.4.1
 
