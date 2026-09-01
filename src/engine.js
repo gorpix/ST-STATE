@@ -11,6 +11,10 @@ import { deepClone, sanitizePlainText } from './util.js';
 
 export const SKIP_GENERATION_TYPES = new Set(['quiet', 'impersonate', 'continue']);
 
+function hasNormalRoleplayHeader(text) {
+    return /^\s*\[[^\]\r\n]*\bTime\b[^\]\r\n]*\bDay\b[^\]\r\n]*\]/i.test(String(text ?? ''));
+}
+
 export function recordControlMetadata(message, extracted, result, at, { swipeIdentity = '' } = {}) {
     if (!message || typeof message !== 'object') return;
     if (!message.extra || typeof message.extra !== 'object' || Array.isArray(message.extra)) message.extra = {};
@@ -307,10 +311,11 @@ export class STStateEngine {
     }
 
     async _processNativeMessage(message, { index = -1, messageIdentity = '', expectedChatId = undefined, raw }) {
-        const extracted = extractHiddenPatch(raw);
+        let extracted = extractHiddenPatch(raw);
         const state = this.loadState();
         const identity = messageIdentity || `message:${index}`;
         const targetChatId = expectedChatId === undefined ? this.adapter.getChatId?.() : expectedChatId;
+        let recoveredMissingPatch = false;
         const cleanup = async (result) => {
             recordControlMetadata(message, extracted, result, this.now(), { swipeIdentity: identity });
             stripMessageControlPayload(message);
@@ -323,6 +328,25 @@ export class STStateEngine {
             const result = { status: 'ignored', reason: 'flash_handoff', mode: 'NATIVE', state, displayText: extracted.prose, extracted, persisted: false };
             await cleanup(result);
             return result;
+        }
+        if (!extracted.found && hasNormalRoleplayHeader(raw)) {
+            recoveredMissingPatch = true;
+            extracted = {
+                ...extracted,
+                found: true,
+                complete: true,
+                ok: true,
+                error: null,
+                synthetic: true,
+                patch: {
+                    version: 2,
+                    base: state.head,
+                    mode: 'NORMAL',
+                    tx: `missing-tail:${identity}`.slice(0, 200),
+                    ops: [],
+                },
+            };
+            this.diagnostics.warn('NATIVE_TAIL_RECOVERED', 'Hybrid Native response omitted ST_PATCH; committed the safe zero-delta tail.', { messageIndex: index });
         }
         if (!extracted.found || !extracted.ok) {
             const status = extracted.found ? 'native_malformed' : 'native_missing';
@@ -376,9 +400,10 @@ export class STStateEngine {
             displayText: extracted.prose,
             extracted,
             compatibility: compatibility.found,
+            recoveredMissingPatch,
             persisted: true,
         };
-        this.diagnostics.info('NATIVE_COMMIT', `Hybrid Native committed ct ${result.state.ct}.`, { paths: result.diff?.forward?.map((change) => change.path) ?? [] });
+        this.diagnostics.info('NATIVE_COMMIT', `Hybrid Native committed ct ${result.state.ct}${recoveredMissingPatch ? ' with a recovered zero-delta tail' : ''}.`, { paths: result.diff?.forward?.map((change) => change.path) ?? [] });
         await cleanup(result);
         return result;
     }

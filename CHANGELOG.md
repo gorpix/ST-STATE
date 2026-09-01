@@ -1,9 +1,10 @@
 # Changelog
 
-## 0.4.4-eval.1
+## 0.4.4-eval.2
 
 - Expired unrefreshed present-actor and scene happenings without aging durable knowledge or relationships.
 - Added `actor.hold` for continuing conditions and `actor.once` for one-response actions.
+- Recovered missing Native tails as zero-delta commits for header-bearing NORMAL responses, including regenerated swipes.
 
 ## 0.4.3
 

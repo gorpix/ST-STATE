@@ -86,6 +86,23 @@ test('Hybrid Native expires omitted stale happenings for present actors', async 
     assert.deepEqual(store.load().actors.AL.aware, ['The knot has been cut']);
 });
 
+test('Hybrid Native recovers a missing patch only for header-bearing NORMAL prose', async () => {
+    const { context, engine, store } = setup();
+    setChatMode(context.chatMetadata, 'NATIVE');
+    const normal = { is_user: false, mes: '[ Time 9:24 PM | Day 14 | Place ]\n\nVisible prose without a patch.' };
+    const recovered = await engine.processAssistantMessage(normal, { index: 0, messageIdentity: 'missing-normal-tail' });
+    assert.equal(recovered.status, 'native_committed');
+    assert.equal(recovered.recoveredMissingPatch, true);
+    assert.equal(recovered.state.ct, 1);
+    assert.deepEqual(recovered.patch.ops, []);
+    assert.equal(normal.mes, '[ Time 9:24 PM | Day 14 | Place ]\n\nVisible prose without a patch.');
+
+    const plain = { is_user: false, mes: 'Plain out-of-character prose without a patch.' };
+    const frozen = await engine.processAssistantMessage(plain, { index: 1, messageIdentity: 'missing-plain-tail' });
+    assert.equal(frozen.status, 'native_missing');
+    assert.equal(store.load().ct, 1);
+});
+
 test('Hybrid Native commits Emotional Residue without a compatibility block', async () => {
     const { context, engine, store } = setup();
     setChatMode(context.chatMetadata, 'NATIVE');
