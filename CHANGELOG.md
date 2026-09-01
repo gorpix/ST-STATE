@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.0-eval.16
+## 0.4.1
 
 - Stopped Native compatibility diffs from recursively embedding canonical history.
 - Automatically compacted already-expanded history records during state migration.
