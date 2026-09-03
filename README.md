@@ -16,7 +16,7 @@ ST-STATE is a SillyTavern companion extension for its related preset ST-ENDGAME,
 - Local d20 generated and sent for {{user}} and present NPCs
 
 ![iPhone](https://github.com/gorpix/ST-STATE/blob/main/iphone.PNG?raw=true)
-![Android](https://github.com/gorpix/ST-STATE/blob/main/android.png?raw=true)
+![Android](https://github.com/gorpix/ST-STATE/blob/main/android.PNG?raw=true)
 
 ## To-do
 
