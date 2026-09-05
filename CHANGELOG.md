@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.4-eval.3
+
+- Accepted legacy-shaped `actor.set|ID|once|field|value` and `hold` lifetime modifiers without discarding sibling actor updates.
+
 ## 0.4.4-eval.2
 
 - Expired unrefreshed present-actor and scene happenings without aging durable knowledge or relationships.

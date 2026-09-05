@@ -17,7 +17,7 @@ export class PatchValidationError extends Error {
 }
 
 const ENVELOPE_KEYS = new Set(['version', 'base', 'head', 'mode', 'ops', 'ct', 'tx', 'id', 'transactionId', 'messageId']);
-const ACTOR_OP_KEYS = new Set(['op', 'id', 'field', 'value', 'set', 'fields']);
+const ACTOR_OP_KEYS = new Set(['op', 'id', 'field', 'value', 'set', 'fields', 'lifetime']);
 const ACTOR_CLEAR_OP_KEYS = new Set(['op', 'id', 'field', 'fields']);
 const CREATE_OP_KEYS = new Set(['op', 'id', 'actor', 'set', 'fields']);
 const SCENE_OP_KEYS = new Set(['op', 'field', 'value', 'set', 'fields']);
@@ -329,11 +329,17 @@ function normalizeOperation(operation, index, knownActors, errors, state = null)
         if (hasField) {
             assignActorField(fields, operation.field, operation.value, `${path}.value`, errors);
         }
+        let lifetime = operation.op === 'actor.set' ? operation.lifetime : operation.op.slice('actor.'.length);
+        if (operation.op !== 'actor.set' && hasOwn(operation, 'lifetime')) fail(errors, `${path}.lifetime`, 'must not accompany actor.hold or actor.once');
+        if (lifetime !== undefined && !['hold', 'once'].includes(lifetime)) {
+            fail(errors, `${path}.lifetime`, 'must be hold or once');
+            lifetime = undefined;
+        }
         return {
             op: 'actor.set',
             id: operation.id,
             set: fields,
-            ...(operation.op === 'actor.set' ? {} : { lifetime: operation.op.slice('actor.'.length) }),
+            ...(lifetime === undefined ? {} : { lifetime }),
         };
     }
     if (operation.op === 'actor.create') {
@@ -448,6 +454,43 @@ function normalizeOperation(operation, index, knownActors, errors, state = null)
     return null;
 }
 
+function expandActorLifetimeAliases(operations) {
+    const expanded = [];
+    for (const operation of operations ?? []) {
+        const fieldsKey = hasOwn(operation ?? {}, 'set') ? 'set' : (hasOwn(operation ?? {}, 'fields') ? 'fields' : '');
+        const fields = fieldsKey ? operation[fieldsKey] : null;
+        if (operation?.op !== 'actor.set' || !isPlainObject(fields)) {
+            expanded.push(operation);
+            continue;
+        }
+        const aliases = Object.entries(fields).filter(([field]) => ['once', 'hold'].includes(normalizeFieldTerm(field)));
+        if (aliases.length === 0) {
+            expanded.push(operation);
+            continue;
+        }
+        const ordinary = deepClone(operation);
+        for (const [field] of aliases) delete ordinary[fieldsKey][field];
+        if (Object.keys(ordinary[fieldsKey]).length > 0) expanded.push(ordinary);
+        for (const [aliasField, encoded] of aliases) {
+            const lifetime = normalizeFieldTerm(aliasField);
+            const separator = typeof encoded === 'string' ? encoded.indexOf('|') : -1;
+            if (separator <= 0 || separator === encoded.length - 1) {
+                // Preserve the original invalid shape so normal validation
+                // reports the unsupported field instead of guessing.
+                expanded.push({ op: 'actor.set', id: operation.id, set: { [aliasField]: encoded } });
+                continue;
+            }
+            expanded.push({
+                op: `actor.${lifetime}`,
+                id: operation.id,
+                field: encoded.slice(0, separator).trim(),
+                value: encoded.slice(separator + 1).trim(),
+            });
+        }
+    }
+    return expanded;
+}
+
 /**
  * Validate and sanitize a complete M2 patch. No reducer is called here, which
  * makes it safe to validate every operation before an atomic commit.
@@ -471,12 +514,13 @@ export function validatePatchEnvelope(input, { state = null } = {}) {
     }
     if (!PATCH_MODES.includes(patch.mode)) fail(errors, '$.mode', 'must be NORMAL, OOC, or FLASH');
     if (!Array.isArray(patch.ops)) fail(errors, '$.ops', 'must be an array');
-    if (Array.isArray(patch.ops) && patch.ops.length > MAX_PATCH_OPS) fail(errors, '$.ops', `must contain at most ${MAX_PATCH_OPS} operations`);
+    const sourceOperations = Array.isArray(patch.ops) ? expandActorLifetimeAliases(patch.ops) : [];
+    if (sourceOperations.length > MAX_PATCH_OPS) fail(errors, '$.ops', `must contain at most ${MAX_PATCH_OPS} operations after compatibility normalization`);
     const knownActors = new Set(Object.keys(state?.actors ?? {}).filter(isValidActorId));
     const operations = [];
     if (Array.isArray(patch.ops)) {
-        for (let index = 0; index < patch.ops.length; index += 1) {
-            const normalized = normalizeOperation(patch.ops[index], index, knownActors, errors, state);
+        for (let index = 0; index < sourceOperations.length; index += 1) {
+            const normalized = normalizeOperation(sourceOperations[index], index, knownActors, errors, state);
             if (normalized) operations.push(normalized);
         }
     }

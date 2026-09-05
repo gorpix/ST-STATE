@@ -339,6 +339,25 @@ test('held happenings persist until replaced while one-turn happenings expire ne
     assert.equal(Object.hasOwn(released.state.opaque.happeningLifetimes, 'actors.AL.body'), false);
 });
 
+test('legacy lifetime fields split into ordinary and lifetime actor operations', () => {
+    const before = state();
+    const validated = validatePatchEnvelope({ version: 2, base: before.head, mode: 'NORMAL', tx: 'legacy-lifetime-shape', ops: [
+        { op: 'actor.set', id: 'AL', set: { once: 'doing|glances toward the door', focus: 'the latch' } },
+        { op: 'actor.set', id: 'US', set: { hold: 'body|left wrist bandaged' } },
+    ] }, { state: before });
+    assert.equal(validated.ok, true);
+    assert.deepEqual(validated.value.ops, [
+        { op: 'actor.set', id: 'AL', set: { focus: 'the latch' } },
+        { op: 'actor.set', id: 'AL', set: { doing: 'glances toward the door' }, lifetime: 'once' },
+        { op: 'actor.set', id: 'US', set: { body: 'left wrist bandaged' }, lifetime: 'hold' },
+    ]);
+    const committed = applyTransaction(before, validated.value, { messageIdentity: 'legacy-lifetime-message', presentActorIds: ['AL', 'US'], now: 3 });
+    assert.equal(committed.status, 'committed');
+    assert.equal(committed.state.actors.AL.doing, 'glances toward the door');
+    assert.equal(committed.state.actors.AL.focus, 'the latch');
+    assert.equal(committed.state.actors.US.body, 'left wrist bandaged');
+});
+
 test('clear validation rejects identity fields and unknown actors', () => {
     const before = state();
     const identity = validatePatchEnvelope({ version: 2, base: before.head, mode: 'NORMAL', ops: [

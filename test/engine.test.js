@@ -103,6 +103,17 @@ test('Hybrid Native recovers a missing patch only for header-bearing NORMAL pros
     assert.equal(store.load().ct, 1);
 });
 
+test('Hybrid Native accepts actor.set lifetime modifiers emitted as legacy fields', async () => {
+    const { context, engine, store } = setup();
+    setChatMode(context.chatMetadata, 'NATIVE');
+    const message = { is_user: false, mes: '[ Time 9:24 PM | Day 14 | Place ]\n\nVisible. <!--ST_PATCH\nV2\nbase=GENESIS\nmode=NORMAL\ntx=legacy-once\nactor.set|AL|once|doing|glances toward the door\nactor.set|AL|focus|the latch\n-->' };
+    const result = await engine.processAssistantMessage(message, { index: 0, messageIdentity: 'legacy-once-message' });
+    assert.equal(result.status, 'native_committed');
+    assert.equal(store.load().actors.AL.doing, 'glances toward the door');
+    assert.equal(store.load().actors.AL.focus, 'the latch');
+    assert.deepEqual(store.load().opaque.happeningLifetimes['actors.AL.activity'], { mode: 'once', setCt: 1 });
+});
+
 test('Hybrid Native commits Emotional Residue without a compatibility block', async () => {
     const { context, engine, store } = setup();
     setChatMode(context.chatMetadata, 'NATIVE');
