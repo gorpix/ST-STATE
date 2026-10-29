@@ -15,7 +15,7 @@
 
 | Task | Size | Done when |
 |---|---|---|
-| Chekhov parser reads `Locked` and `Fired` on their own lines | S | A test with the three-line form models write passes |
+| ✅ Chekhov parser reads groups on their own lines and pipe-separated entries | S | A test with the three-line form models write passes |
 | Same tolerance for inventory, quests, and profiles split across lines | S | Each has a test with real model layouts |
 | Dashboard reliability counter per chat: committed / malformed / rejected / missing | S | The success rate is visible without reading chat files |
 | Live SillyTavern checklist: streaming on and off, swipes, edits, deletes, chat switching, OOC, FLASH, GFX | M | Every item passes; each bug found gets a fix and a test |

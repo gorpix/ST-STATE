@@ -350,13 +350,34 @@ function parseInventorySection(state, section, diagnostics) {
     if (lines.length && !lines.some((line) => /Inv:|Titles\/Skills:|Status:|Mods:/i.test(line))) diagnostics.unparsed.push(...lines);
 }
 
+// Groups arrive on one line (Active: … | Locked: … | Fired: …) or one per
+// line, and models also separate entries inside a group with pipes or list
+// them on following lines. Walk the pipe-separated parts in order: a labelled
+// part opens its group, and an unlabelled part is another entry in it.
 function parseChekhovSection(state, section, diagnostics) {
+    const groups = { active: null, locked: null, fired: null };
+    const addEntry = (group, text) => {
+        const value = parseValueOrNone(text);
+        if (value !== 'None') group.push(value);
+    };
+    let current = null;
     for (const line of rowsFromHtml(section?.content ?? '')) {
-        const fields = parseLabelFields(line);
-        if (!hasOwn(fields, 'Active')) { if (!/^none$/i.test(removeBullet(line))) diagnostics.unparsed.push(line); continue; }
-        const parseList = (value) => parseValueOrNone(value) === 'None' ? [] : [parseValueOrNone(value)];
-        state.chekhov = { active: parseList(fields.Active), locked: parseList(fields.Locked), fired: parseList(fields.Fired) };
+        let used = false;
+        for (const part of splitPipeFields(removeBullet(line))) {
+            const label = part.match(/^(Active|Locked|Fired)\s*:\s*(.*)$/i);
+            if (label) {
+                current = label[1].toLowerCase();
+                groups[current] ??= [];
+                addEntry(groups[current], label[2]);
+                used = true;
+            } else if (current && part) {
+                addEntry(groups[current], part);
+                used = true;
+            }
+        }
+        if (!used && !/^none$/i.test(removeBullet(line))) diagnostics.unparsed.push(line);
     }
+    if (Object.values(groups).some(Boolean)) state.chekhov = { active: groups.active ?? [], locked: groups.locked ?? [], fired: groups.fired ?? [] };
 }
 
 function parseThoughtSection(state, section, diagnostics) {

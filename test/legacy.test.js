@@ -59,6 +59,31 @@ test('explicit legacy actor IDs survive import/export without renaming', () => {
     assert.equal(roundTrip.relations.pairs['QZ|US'].b, 'US');
 });
 
+function chekhovSource(rows) {
+    return `<!-- GFX_START -->\n<internal_states>\n<details><summary>🎬 INTERNAL STATES (Turn: 3)</summary>\n<details><summary>👥 NPC STATE</summary>\n- [QZ] Quill | At: desk | Doing: writing | Agenda: None | VAD: 0/0/0 | Focus: ink | Aware: room | Fibs: None | Circle: None | Body: well\n</details>\n<details><summary>🔫 CHEKHOV'S GUN</summary>\n${rows}\n</details>\n</details>\n</internal_states>\n<!-- GFX_END -->`;
+}
+
+test('Chekhov reads groups on separate lines and pipe-separated entries', () => {
+    const rows = '- Active: [BULLET: Why Nick was bounced] (weight:2, age:0) | [BULLET: Pizza bribe] (weight:1, age:0)\n- Locked: [BULLET: The milk crate PC]\n- Fired: None';
+    const imported = importLegacyState(chekhovSource(rows));
+    assert.deepEqual(imported.state.chekhov, {
+        active: ['[BULLET: Why Nick was bounced] (weight:2, age:0)', '[BULLET: Pizza bribe] (weight:1, age:0)'],
+        locked: ['[BULLET: The milk crate PC]'],
+        fired: [],
+    });
+    assert.deepEqual(imported.state.opaque.legacy.unparsed?.["CHEKHOV'S GUN"] ?? [], []);
+});
+
+test('Chekhov still reads the single-line template and entries listed under a group', () => {
+    const single = importLegacyState(chekhovSource('- Active: a loose tile | Locked: None | Fired: the bell')).state.chekhov;
+    assert.deepEqual(single, { active: ['a loose tile'], locked: [], fired: ['the bell'] });
+    const listed = importLegacyState(chekhovSource('- Active:\n- [BULLET: one]\n- [BULLET: two]\n- Locked: None\n- Fired: None')).state.chekhov;
+    assert.deepEqual(listed, { active: ['[BULLET: one]', '[BULLET: two]'], locked: [], fired: [] });
+    const roundTrip = importLegacyState(exportLegacyState(importLegacyState(chekhovSource('- Active: a | b\n- Fired: c')).state)).state.chekhov;
+    assert.deepEqual(roundTrip.fired, ['c']);
+    assert.ok(roundTrip.active.length >= 1 && roundTrip.active.join(', ').includes('a'));
+});
+
 test('old BONDS code labels resolve to actors parsed from NPC STATE', () => {
     const source = `<!-- GFX_START -->\n<internal_states>\n<details><summary>🎬 INTERNAL STATES (Turn: 3)</summary>\n<details><summary>👥 NPC STATE</summary>\n- Ryan | At: room | Doing: waiting | Agenda: None | VAD: 0/0/0 | Focus: door | Aware: room | Fibs: None | Circle: None | Body: well\n</details>\n<details><summary>💚 BONDS</summary>\n- US ↔ RY | BOND: 2 | Sparks: 0 | Grudge: 0\n- Profile RY→US: Type=friend | Route=maintain | Trust=Reliable | Attraction=none | Expect=None | Public/Private=warm/warm | Jealousy=none | Boundary=None | Anchors=None\n</details>\n</details>\n</internal_states>\n<!-- GFX_END -->`;
     const imported = importLegacyState(source, { userName: 'Janko' }).state;

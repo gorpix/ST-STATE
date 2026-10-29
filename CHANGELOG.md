@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Read Chekhov's Gun groups written on separate lines, entries separated by pipes, and entries listed under a group, instead of keeping only the first Active entry.
 - Ignored `ST_OUTPUT_TAIL_LATCH` marker lines that a model copies into its ST_PATCH, instead of rejecting the whole patch.
 - Slimmed the injected SHADOW and NATIVE protocols (v2): one shared rule set, outcome-based wording instead of the scripted freshness audit, and no rules the preset already owns (header text, routing).
 - Named the preset's exact bracketed header line in both modes, and gave NATIVE the exact `GFX_START`/`<internal_states>` wrapper for partial blocks so they merge instead of staying visible.
