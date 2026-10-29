@@ -10,7 +10,7 @@ The state document is versioned (`schemaVersion: 2`) and includes the legacy sec
 
 ## Transaction lifecycle
 
-1. A generation interceptor selects a small hot pack from the fresh state (exact user mentions, spotlight/on-screen actors, their direct relations, and scene/meta) and injects a protocol plus line-based pack with `setExtensionPrompt`. No chat message is modified for prompt injection.
+1. A generation interceptor selects a small hot pack from the fresh state (exact user mentions, spotlight/on-screen actors, their direct relations, and scene/meta) and injects a protocol plus line-based pack with `setExtensionPrompt`. The `ST_GFX V1` rules are part of that protocol only while local GFX is enabled. No chat message is modified for prompt injection.
 2. Before each assistant `MESSAGE_RECEIVED`, the extension records the canonical state once for that message slot and selected swipe. The handler then extracts the latest complete `<!--ST_PATCH ... -->` envelope, detects `<flash_handoff .../>`, and derives a swipe-specific identity.
 3. Shadow requires a complete, current-format `<internal_states>` block with the expected next turn counter. That legacy import is authoritative. A present ST_PATCH is validated and dry-run against the previous canonical head on a clone; a missing, malformed, stale, or rejected patch makes parity not comparable but does not block a valid legacy import.
 4. The parity comparator checks only `ct`, actor paths, and scene paths (mapping `at`/`location` and `doing`/`activity` aliases). Cold domains are listed as unsupported. The imported legacy document is persisted; the dry-run patch and its history never are.

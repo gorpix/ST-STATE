@@ -188,12 +188,13 @@ export function inspectShadowBaseline(adapter, state, { now = Date.now() } = {})
 }
 
 export class STStateEngine {
-    constructor({ adapter, store, diagnostics = new DiagnosticLog(), now = () => Date.now(), modeResolver = null } = {}) {
+    constructor({ adapter, store, diagnostics = new DiagnosticLog(), now = () => Date.now(), modeResolver = null, gfxResolver = null } = {}) {
         this.adapter = adapter;
         this.store = store;
         this.diagnostics = diagnostics;
         this.now = now;
         this.modeResolver = modeResolver;
+        this.gfxResolver = gfxResolver;
         this.processing = Promise.resolve();
     }
 
@@ -215,7 +216,9 @@ export class STStateEngine {
         let state = this.loadState({ initialize: false });
         const userText = options.userText ?? this.latestUserText();
         const mode = String(options.mode ?? this.getMode()).trim().toUpperCase();
-        return buildProtocolPrompt(state, { ...options, userText, mode });
+        // GFX rules are only worth their prompt space while the local renderer is on.
+        const gfx = options.gfx ?? this.gfxResolver?.() !== false;
+        return buildProtocolPrompt(state, { ...options, userText, mode, gfx });
     }
 
     latestUserText() {

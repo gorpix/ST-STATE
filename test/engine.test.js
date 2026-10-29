@@ -47,6 +47,18 @@ test('legacy mode does not process controls, while shadow prompt includes handsh
     assert.equal(context.injection[2], 1);
 });
 
+test('injected protocol carries GFX rules only while the GFX resolver allows them', async () => {
+    const { context, adapter, store } = setup();
+    setChatMode(context.chatMetadata, 'NATIVE');
+    let gfxEnabled = true;
+    const engine = new STStateEngine({ adapter, store, now: () => 5, gfxResolver: () => gfxEnabled });
+    await engine.injectPrompt('normal', { userText: 'Alice' });
+    assert.match(context.injection[1], /<!--ST_GFX\nV1/);
+    gfxEnabled = false;
+    await engine.injectPrompt('normal', { userText: 'Alice' });
+    assert.doesNotMatch(context.injection[1], /ST_GFX\nV1|Pop-in graphic/);
+});
+
 test('Hybrid Native commits an authoritative patch without a full legacy block', async () => {
     const { context, engine, store } = setup();
     setChatMode(context.chatMetadata, 'NATIVE');
@@ -138,7 +150,7 @@ test('Hybrid Native bootstraps first-turn user and card identities before prompt
     assert.equal(store.load().actors.NS.name, 'Nicholas Snickerson');
     assert.match(injected.text, /\"id\":\"US\"/);
     assert.match(injected.text, /\"id\":\"NS\"/);
-    assert.match(injected.text, /including identity-only first-turn bootstrap rows/);
+    assert.match(injected.text, /Every actor listed there already exists/);
 
     const message = { is_user: false, mes: 'Visible <!--ST_PATCH\nV2\nbase=GENESIS\nmode=NORMAL\ntx=first-native\nactor.set|US|doing|Watching Nick unpack\nactor.set|NS|doing|Unpacking\nrelation.set|US|NS|bond|0\nscene.position|NS|By the bed\n-->' };
     const result = await engine.processAssistantMessage(message, { index: 0, messageIdentity: 'first-native-message' });

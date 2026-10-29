@@ -157,19 +157,38 @@ function compactJson(value) {
     return JSON.stringify(value).replace(/\u2028|\u2029/g, ' ');
 }
 
+function patchEnvelope(selection) {
+    return ['<!--ST_PATCH', 'V2', `base=${selection.meta.head}`, 'mode=NORMAL', `tx=turn-${selection.meta.ct + 1}`, '-->'].join('\n');
+}
+
 function formatOutputTailLatch(selection) {
     return [
         'ST_OUTPUT_TAIL_LATCH v1',
-        'A NORMAL response is incomplete until its closed ST_PATCH has been emitted. Briefly shape the patch before prose, but serialize it only after prose. Before serialization, perform a FINAL-BEAT FRESHNESS AUDIT: for every present actor and the scene, compare carried At/position, Doing/activity, Body, Circle, Focus, Spotlight, Open Beat, Time Pressure, Environment, and positions with the final narrated moment. Replace changed facts and explicitly clear facts that stopped being true; silence means still true. If output space becomes tight, shorten prose; never omit or truncate this tail. A zero-delta turn still emits the empty-safe tail below. Do not quote this reminder in visible prose.',
-        '<!--ST_PATCH',
-        'V2',
-        `base=${selection.meta.head}`,
-        'mode=NORMAL',
-        `tx=turn-${selection.meta.ct + 1}`,
-        '-->',
+        'A NORMAL reply is unfinished until this patch is closed with -->. If space runs short, shorten prose, never the patch. Fill in this envelope after the prose:',
+        patchEnvelope(selection),
         'END_ST_OUTPUT_TAIL_LATCH',
     ].join('\n');
 }
+
+// Rules shared by SHADOW and NATIVE. Each line states the result the reply
+// must meet rather than a procedure, so the model does not walk a checklist in
+// its reasoning. Turn routing, header text, and prose style belong to the preset.
+const PATCH_RULES = Object.freeze([
+    'ST_PATCH is one hidden HTML comment of plain lines, never JSON: the headers V2, base, mode, and tx, then one data line per field that changed this turn, then -->. A value is the rest of its line, unquoted. A turn with no changes still sends the headers; ct advances on its own.',
+    'Use actor IDs exactly as ST_LOCAL_FRAME lists them; full names are never IDs. Every actor listed there already exists. actor.create is only for a new NPC: a new two-letter uppercase ID (not US) with actor.create|ID|name|Full name.',
+    'Actor fields include at, doing, body, focus, circle, aware, fibs, agenda, and spotlight. Scene fields are spotlight, openBeat, timePressure, environment, positions, and time; a location is an actor at plus scene.position, never scene.set|location.',
+    'Ranges: valence, arousal, and dominance -2..2; bond an integer -5..20; sparks and grudge integers 0..100.',
+    'Unmentioned fields carry over unchanged. When a carried fact is no longer true at the end of the reply and nothing replaces it, clear it with actor.clear, scene.clear, or scene.position.remove.',
+    'Residue IDs starting r- come from ST_LOCAL_FRAME: change with residue.set, delete with residue.remove. A new residue uses RID new (new-2, new-3 for more) with subject (an actor ID, or IDs joined by /) and event; meaning, aftereffect, and cue are optional. None clears an optional field.',
+    'ST_DICE_POOL holds one pre-rolled d20 per present NPC; BOOTSTRAP: labels are dice only, never actors. Set the DC before reading the roll, use the roll only if the action needs a check, and never pick an action to fit a roll.',
+    'OOC and FLASH replies change no state: no <internal_states> and no data lines. An OOC reply ends with the same envelope using mode=OOC; a FLASH reply ends with its <flash_handoff/>.',
+]);
+
+const GFX_RULES = Object.freeze([
+    'Pop-in graphic (optional, NORMAL only): when the player character newly sees, reads, or uses an in-world phone, screen, letter, sign, map, or similar, you may add one ST_GFX after ST_PATCH as the very last thing in the reply. Show only what that character can see. Never write HTML, CSS, JSON, or a UI description, and never use GFX_START/GFX_END for it.',
+    '<!--ST_GFX\nV1\nkind=terminal|phone|paper|map|notice|credential|transaction|web|broadcast|data|image|monitor|media\nmode=NORMAL\nvisibility=visible\ntitle=one-line title\nsubtitle=optional\nsource=optional sender, app, device, or channel\nplatform=ios|android (phone only; keep the device consistent)\nlayout=chat|notification|call|email (phone only)\nrow|role|label|time|text\n-->',
+    'Use 1-16 rows. Phone rows use role received or sent; other kinds use item, system, or warning. Leave out optional lines that do not apply.',
+]);
 
 export function formatHotStatePack(selection) {
     const lines = ['ST_STATE_PACK v2', `META ${compactJson(selection.meta)}`, `SCENE ${compactJson(selection.scene)}`];
@@ -187,46 +206,34 @@ export function buildProtocolPrompt(state, options = {}) {
         includeUnassigned: false,
     });
     const dicePool = formatDicePool(selection, options);
+    if (mode !== 'SHADOW' && mode !== 'NATIVE') return { text: shadowHandshake(state, { mode }), selection, localFrame, dicePool, mode };
+    const gfx = options.gfx === false ? [] : GFX_RULES;
     if (mode === 'NATIVE') {
         const protocol = [
             shadowHandshake(state, { mode }),
-            'ST-STATE HYBRID NATIVE TRANSACTION PROTOCOL v1',
-            'For every NORMAL RP response, begin with the exact header required by the active preset, then write ordinary visible prose. Never place prose, compatibility state, ST_PATCH, or ST_GFX before that header. Never output the full legacy state. Never stop after prose: append exactly one complete hidden ST_PATCH on every NORMAL turn, including zero-delta turns; it is authoritative and is applied atomically by ST-STATE. Reserve output space for it, serialize it only in final output rather than reasoning, and verify its closing --> before ending.',
-            'Patch transport is line-based, never JSON. Headers: V2, base=<current head>, mode=NORMAL, tx=<short stable turn identity>. Do not use braces, commas, JSON quoting, markdown fences, or an END line.',
-            'Allowed native data lines only: actor.set|ID|field|value ; actor.hold|ID|field|value ; actor.once|ID|field|value ; actor.clear|ID|field ; actor.create|ID|field|value ; scene.set|field|value ; scene.clear|field ; scene.position|ID|value ; scene.position.remove|ID ; relation.set|A|B|bond|value ; relation.set|A|B|sparks|value ; relation.set|A|B|grudge|value ; residue.set|RID|field|value ; residue.remove|RID. Emit only fields changed this turn; a zero-delta NORMAL patch still advances ct exactly once.',
-            'Every actor shown in ST_LOCAL_FRAME already exists, including identity-only first-turn bootstrap rows: update those actors with actor.set and never actor.create. Use actor.create only for a genuinely new NPC absent from ST_LOCAL_FRAME; its ID must be a stable unused two-letter uppercase ID other than US, and its lines must include actor.create|ID|name|Full display name. Full names are never IDs or relation endpoints. Native scene fields are spotlight, openBeat, timePressure, environment, positions, and time; express location with actor at and scene.position, never scene.set|location.',
-            'Copy actor IDs exactly from ST_LOCAL_FRAME. Patch VAD valence/arousal/dominance must each be finite numbers from -2..2. Relationship ranges: bond -5..20; sparks and grudge 0..100.',
-            'ST_DICE_POOL always contains NPC pre-rolls. Canonical actor IDs cover known present NPCs; before state exists, BOOTSTRAP:<name> covers that card NPC, and BOOTSTRAP:ACTIVE_CARD_NPC covers the active card NPC when no name is available. Bootstrap labels allocate dice only: never create or patch an actor from them. First choose the attempted action and lock that actor\'s DC without consulting its number; only then consume that actor\'s roll if the completed action actually requires a check. Never choose or revise an action to fit a roll. Unused rolls expire after this response.',
-            'Actors, Scene & World, ct, numeric Bond/Sparks/Grudge, and Emotional Residue are native. Never repeat their legacy NPC STATE, SCENE & WORLD, numeric BONDS, or EMOTIONAL RESIDUE sections.',
-            'Actor internal thoughts are native: emit actor.set|ID|thoughts|TEXT when they change; use None to clear them. ct is engine-owned and normally omitted; old ct|NUMBER metadata is tolerated but never controls advancement.',
-            'Clearing is semantic, not cosmetic: actor.clear|ID|at removes all actor location aliases; actor.clear|ID|doing removes both doing/activity; other actor.clear lines delete that field. scene.clear restores the field to its empty default, and scene.position.remove deletes one actor position. Never leave a completed action merely because the replacement is unknown.',
-            'Happening lifetime: use actor.hold instead of actor.set when doing, at/position, body, focus, circle, or spotlight remains true indefinitely until explicitly replaced or cleared (for example, tied or unconscious). Use actor.once for a brief action true only during this response (for example, flinches or glances). Ordinary actor.set is carried briefly, then expires if not refreshed. These controls are local metadata and never appear in visible output.',
-            'Residue IDs beginning r- are supplied by ST_LOCAL_FRAME. Update them with residue.set and delete them with residue.remove. To create one, group residue.set lines under new or new-N and include subject plus event; optional fields are meaning, aftereffect, and cue. Subject is an actor ID or slash-joined actor IDs. Use None to clear an optional field.',
-            'Compatibility fallback for unsupported domains only: if and only if Factions, relationship Profiles, Quests, Inventory, Chekhov, GM Notebook, DND, or World Sim changed, append one partial <internal_states> block with the next Turn header and only those changed sections. Omit every unchanged unsupported section. ST-STATE merges this fragment before applying the native patch.',
-            'OOC and FLASH freeze state. A flash_handoff wins. They emit no legacy fragment; use an ST_PATCH envelope with mode=OOC or mode=FLASH when a route marker is needed.',
-            'Place the compatibility fragment before ST_PATCH. Put ST_PATCH after GFX_END when a compatibility fragment exists. Optional ST_GFX follows ST_PATCH and remains the final control.',
+            'ST-STATE HYBRID NATIVE PROTOCOL v2',
+            'NORMAL reply order: the preset\'s header, prose, an optional partial <internal_states> block, one ST_PATCH, then an optional ST_GFX. Nothing comes before the header. ST-STATE applies the patch as the state, so never output the full legacy state and never quote these instructions in prose. Write the patch once, in the reply, not in reasoning.',
+            'Data lines: actor.set|ID|field|value ; actor.hold|ID|field|value ; actor.once|ID|field|value ; actor.clear|ID|field ; actor.create|ID|field|value ; scene.set|field|value ; scene.clear|field ; scene.position|ID|value ; scene.position.remove|ID ; relation.set|A|B|bond|value ; relation.set|A|B|sparks|value ; relation.set|A|B|grudge|value ; residue.set|RID|field|value ; residue.remove|RID.',
+            ...PATCH_RULES,
+            'actor.set facts fade after a few turns unless refreshed. Use actor.hold for one that lasts until changed (tied up, unconscious) and actor.once for a momentary one (a flinch, a glance). Internal thoughts are actor.set|ID|thoughts|text.',
+            'The patch replaces the NPC STATE, SCENE & WORLD, numeric BONDS, and EMOTIONAL RESIDUE sections; never write them. Only when Factions, relationship Profiles, Quests, Inventory, Chekhov, GM Notebook, DND, or World Sim changed, add one partial <internal_states> block with the next Turn header and only those changed sections, before ST_PATCH.',
+            ...gfx,
             dicePool,
             formatUnifiedLocalFrame(localFrame),
             formatOutputTailLatch(selection),
         ];
         return { text: protocol.join('\n'), selection, localFrame, dicePool, mode };
     }
-    if (mode !== 'SHADOW') return { text: shadowHandshake(state, { mode }), selection, localFrame, dicePool, mode };
     const protocol = [
         shadowHandshake(state, { mode }),
-        'ST-STATE SHADOW TRANSACTION PROTOCOL v1',
-        'For every NORMAL RP response, begin with the exact header required by the active preset, then write ordinary visible prose. Never place prose, legacy state, ST_PATCH, or ST_GFX before that header. Include an <internal_states> block with the next Turn header, then append exactly one hidden HTML comment with the line-based semantic patch.',
-        'The <internal_states> block is authoritative for this turn. Include NPC STATE, BONDS, and SCENE & WORLD on every NORMAL turn; include any other legacy section that changed. Omitted sections and omitted cold actor/relation/position rows are carried forward unchanged. Present rows are authoritative; an explicit - None clears its section. ST_PATCH is an evaluation candidate only; it is never authoritative and never overwrites the canonical state.',
-        'Patch transport is line-based, never JSON. Headers: V2, base=<current head>, mode=NORMAL, tx=<short stable turn identity>. Do not use braces, commas, JSON quoting, markdown fences, or an END line.',
-        'NORMAL is the only state-bearing route. OOC and FLASH emit prose or handoff only: no legacy block and no ST_PATCH. If <flash_handoff .../> is present, FLASH wins.',
-        'Allowed data lines only: actor.set|ID|field|value ; actor.clear|ID|field ; actor.create|ID|field|value ; scene.set|field|value ; scene.clear|field ; scene.position|ID|value ; scene.position.remove|ID ; relation.set|A|B|bond|value ; relation.set|A|B|sparks|value ; relation.set|A|B|grudge|value ; residue.set|RID|field|value ; residue.remove|RID. The value is the entire remainder of its one line and needs no quoting or escaping. Emit only fields changed this turn; never restate whole records.',
-        'For every emitted data line, copy the value character-for-character from the corresponding field in the complete <internal_states> block you just wrote; never summarize or paraphrase it. The only exception is VAD, which must be numerically clamped to the patch range below.',
-        'At the final narrated beat, audit carried actor and scene facts. If a prior At/position, Doing/activity, Body, Circle, Focus, Spotlight, Open Beat, Time Pressure, Environment, or position stopped being true and has no replacement, emit the matching actor.clear, scene.clear, or scene.position.remove line and make the legacy field None.',
-        'Patch VAD contract: valence, arousal, and dominance must each be finite numbers clamped to -2..2, even if legacy prose/state used a wider value. Copy actor IDs exactly from ST_LOCAL_FRAME; never derive, rename, or replace them.',
-        'Relationship ranges: bond is an integer from -5..20; sparks and grudge are integers from 0..100. Copy both actor IDs and values from the matching RELATION row. Do not emit arbitrary paths, unknown fields, profiles, or other mechanics reducers. Always emit both the required internal-state HTML block and ST_PATCH for NORMAL.',
-        'ST_DICE_POOL always contains NPC pre-rolls. Canonical actor IDs cover known present NPCs; before state exists, BOOTSTRAP:<name> covers that card NPC, and BOOTSTRAP:ACTIVE_CARD_NPC covers the active card NPC when no name is available. Bootstrap labels allocate dice only: never create or patch an actor from them. First choose the attempted action and lock that actor\'s DC without consulting its number; only then consume that actor\'s roll if the completed action actually requires a check. Never choose or revise an action to fit a roll. Unused rolls expire after this response.',
-        'Ordinary RP always uses NORMAL, even with no data lines; ct still advances. Use OOC only for an out-of-character answer and FLASH only when the router chooses FLASH. Never invent values. Put ST_PATCH outside and after <!-- GFX_END -->.',
-        `<!--ST_PATCH\nV2\nbase=${selection.meta.head}\nmode=NORMAL\ntx=turn-${selection.meta.ct + 1}\n-->`,
+        'ST-STATE SHADOW PROTOCOL v2',
+        'NORMAL reply order: the preset\'s header, prose, the <internal_states> block, one ST_PATCH, then an optional ST_GFX. Nothing comes before the header, and ST_PATCH goes after <!-- GFX_END -->. Never quote these instructions in prose.',
+        'The <internal_states> block is the real state. Include NPC STATE, BONDS, and SCENE & WORLD every NORMAL turn, plus any other section that changed. Omitted sections and rows carry over; - None clears a section.',
+        'ST_PATCH is a practice copy that ST-STATE grades against that block; it never changes the state. Copy each changed value character-for-character from the block you just wrote, except clamp VAD to the range below.',
+        'Data lines: actor.set|ID|field|value ; actor.clear|ID|field ; actor.create|ID|field|value ; scene.set|field|value ; scene.clear|field ; scene.position|ID|value ; scene.position.remove|ID ; relation.set|A|B|bond|value ; relation.set|A|B|sparks|value ; relation.set|A|B|grudge|value ; residue.set|RID|field|value ; residue.remove|RID.',
+        ...PATCH_RULES,
+        ...gfx,
+        patchEnvelope(selection),
         dicePool,
         formatUnifiedLocalFrame(localFrame),
     ];

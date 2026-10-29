@@ -874,7 +874,7 @@ export function initialize() {
     const diagnostics = new DiagnosticLog();
     runtimeState.adapter = adapter;
     runtimeState.store = new ChatStore(adapter);
-    runtimeState.engine = new STStateEngine({ adapter, store: runtimeState.store, diagnostics });
+    runtimeState.engine = new STStateEngine({ adapter, store: runtimeState.store, diagnostics, gfxResolver: () => gfxOptions(adapter).enabled });
     runtimeState.settings = ensureSettings(adapter);
     runtimeState.chatTopology = snapshotChatTopology(adapter);
     const capabilities = adapter.diagnostics();
