@@ -437,7 +437,14 @@ export async function handleMessageReceived(data) {
     if (branchActive && (!message.extra || typeof message.extra !== 'object' || Array.isArray(message.extra))) message.extra = {};
     const attachedIdentity = branchActive && !message.extra.stStateMessageId;
     if (attachedIdentity) message.extra.stStateMessageId = identity;
+    const textBefore = message.mes;
     const result = await engine.processAssistantMessage(message, { index, messageIdentity: identity, expectedChatId: chatId });
+    // A streamed reply is already on screen before this event, so stripped
+    // state blocks and controls stay visible unless the message is redrawn.
+    if (message.mes !== textBefore && sameChat(adapter, chatId)) {
+        try { adapter.rerenderMessage?.(index, message); }
+        catch (error) { engine.diagnostics?.warn?.('MESSAGE_RERENDER', `Could not redraw the cleaned message: ${error.message}`); }
+    }
     if (branchActive && runtimeState.store?.loadBranchLedger && runtimeState.store?.saveBranchLedger) {
         try {
             let selected = prepareSwipeEvaluation(runtimeState.store.loadBranchLedger(), options);

@@ -78,6 +78,14 @@ export class HostAdapter {
         return undefined;
     }
 
+    /** Redraw one chat message from its current data; false when the host cannot. */
+    rerenderMessage(index, message) {
+        const context = this.context();
+        if (typeof context?.updateMessageBlock !== 'function' || !Number.isInteger(index) || index < 0) return false;
+        context.updateMessageBlock(index, message);
+        return true;
+    }
+
     setPrompt(value, { key = PROMPT_KEY, position = 1, depth = 0, scan = false, role = 0 } = {}) {
         const context = this.context();
         if (typeof context?.setExtensionPrompt !== 'function') throw new Error('SillyTavern setExtensionPrompt API is unavailable');

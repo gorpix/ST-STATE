@@ -2,9 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { HostAdapter } from '../src/adapter.js';
 import { ChatStore } from '../src/store.js';
-import { previewLocalGfx, previewLocalPhoneGfx, runtimeState, setGfxRuntimeSettings, setGlobalRuntimeMode, setRuntimeMode } from '../src/main.js';
+import { handleMessageReceived, previewLocalGfx, previewLocalPhoneGfx, runtimeState, setGfxRuntimeSettings, setGlobalRuntimeMode, setRuntimeMode } from '../src/main.js';
 import { exportLegacyState, importLegacyState } from '../src/legacy.js';
 import { createEmptyState } from '../src/schema.js';
+import { STStateEngine } from '../src/engine.js';
+import { setChatMode } from '../src/modes.js';
 
 function resetRuntime() {
     runtimeState.adapter = null;
@@ -167,4 +169,45 @@ test('HostAdapter guarded chat save detects a chat switch during persistence', a
     };
     const adapter = new HostAdapter(() => context);
     await assert.rejects(adapter.saveChat({ expectedChatId: 'old-chat' }), /active chat changed/i);
+});
+
+test('a cleaned assistant message is redrawn so stripped state blocks leave the screen', async () => {
+    const block = `<!-- GFX_START -->
+<internal_states>
+<details><summary>🎬 INTERNAL STATES (Turn: 1)</summary>
+<details><summary>🎒 INV & SKILLS</summary>
+- <b>Inv:</b> Dorm key
+- <b>Titles/Skills:</b> None
+- <b>Status:</b> Healthy
+- <b>Mods:</b> None
+</details>
+</details>
+</internal_states>
+<!-- GFX_END -->`;
+    const message = { is_user: false, mes: `[ 🕰️ Time 2:04 PM | 🗓️ Day 1 - Thursday ]
+Alice waves.
+${block}
+<!--ST_PATCH
+V2
+base=GENESIS
+mode=NORMAL
+tx=turn-1
+-->`, swipes: [], swipe_id: 0 };
+    const redrawn = [];
+    const context = { chatId: 'chat', chatMetadata: {}, chat: [{ is_user: true, mes: 'hi' }, message], extensionSettings: {}, setExtensionPrompt: () => {}, saveMetadata: async () => {}, saveChat: async () => {}, updateMessageBlock: (index, msg) => redrawn.push([index, msg.mes]) };
+    const adapter = new HostAdapter(() => context);
+    const state = createEmptyState({ now: 1 });
+    state.actors = { US: { id: 'US', name: 'User' }, AL: { id: 'AL', name: 'Alice' } };
+    context.chatMetadata.stState = state;
+    setChatMode(context.chatMetadata, 'NATIVE', { now: 1 });
+    runtimeState.adapter = adapter;
+    runtimeState.store = new ChatStore(adapter, { now: () => 5 });
+    runtimeState.engine = new STStateEngine({ adapter, store: runtimeState.store, now: () => 5 });
+    try {
+        await handleMessageReceived(1);
+        assert.doesNotMatch(message.mes, /internal_states|ST_PATCH/);
+        assert.equal(redrawn.length, 1);
+        assert.equal(redrawn[0][0], 1);
+        assert.equal(redrawn[0][1], message.mes);
+    } finally { resetRuntime(); }
 });

@@ -162,7 +162,7 @@ function patchEnvelope(selection) {
 }
 
 // The preset's header line; the engine recognizes NORMAL turns by it.
-const HEADER_RULE = 'the exact header line from the preset\'s <header_instructions> (the bracketed [ Time | Day | Location | Weather ] line, never a markdown heading)';
+const HEADER_RULE = 'the header line copied exactly from the preset\'s <header_instructions>, keeping every emoji and the literal labels Time and Day (never a markdown heading or a shortened form)';
 
 function compatibilityFragment(selection) {
     return [
