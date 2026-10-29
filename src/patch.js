@@ -9,6 +9,10 @@ function jsonCandidate(body) {
     return value;
 }
 
+// Markers from the injected tail latch. Models sometimes copy them into the
+// patch itself; they carry no data, so dropping them is always safe.
+const LATCH_MARKER = /^(?:END_)?ST_OUTPUT_TAIL_LATCH(?:\s+v\d+)?$/;
+
 const NUMERIC_PATCH_FIELDS = new Set(['valence', 'arousal', 'dominance', 'agendaStep', 'agendaMax', 'bond', 'sparks', 'grudge']);
 
 function lineValue(field, value) {
@@ -19,7 +23,7 @@ function lineValue(field, value) {
 }
 
 function parseLinePatch(candidate) {
-    const lines = String(candidate ?? '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const lines = String(candidate ?? '').split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !LATCH_MARKER.test(line));
     if (lines[0] !== 'V2') return null;
     const patch = { version: 2, base: '', mode: '', ops: [] };
     const creates = new Map();

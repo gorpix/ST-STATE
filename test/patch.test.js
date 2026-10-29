@@ -103,6 +103,23 @@ test('accepts legacy ct metadata without turning it into a state operation', () 
     }
 });
 
+test('ignores tail-latch markers copied into the patch', () => {
+    const body = 'V2\nbase=h-2\nmode=NORMAL\ntx=turn-3\nactor.set|AL|doing|Waiting';
+    for (const text of [
+        `<!--ST_PATCH\n${body}\nEND_ST_OUTPUT_TAIL_LATCH\n-->`,
+        `<!--ST_PATCH\nST_OUTPUT_TAIL_LATCH v1\n${body}\n-->`,
+        `<!--ST_PATCH\nST_OUTPUT_TAIL_LATCH v1\n${body}\nEND_ST_OUTPUT_TAIL_LATCH\n-->`,
+    ]) {
+        const result = extractHiddenPatch(text);
+        assert.equal(result.ok, true, result.error);
+        assert.equal(result.patch.tx, 'turn-3');
+        assert.deepEqual(result.patch.ops, [{ op: 'actor.set', id: 'AL', set: { doing: 'Waiting' } }]);
+    }
+    const unknown = extractHiddenPatch(`<!--ST_PATCH\n${body}\nEND_ST_PATCH\n-->`);
+    assert.equal(unknown.ok, false);
+    assert.match(unknown.error, /Unknown ST_PATCH line: END_ST_PATCH/);
+});
+
 test('flash handoff freezes and is removed from display', () => {
     assert.equal(hasFlashHandoff('ordinary <flash_handoff reason="zoom"/> prose'), true);
     assert.equal(removeControlPayload('ordinary <flash_handoff reason="zoom"/> prose'), 'ordinary  prose');
