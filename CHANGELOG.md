@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Slimmed the injected SHADOW and NATIVE protocols (v2): one shared rule set, outcome-based wording instead of the scripted freshness audit, and no rules the preset already owns (header text, routing).
+- Named the preset's exact bracketed header line in both modes, and gave NATIVE the exact `GFX_START`/`<internal_states>` wrapper for partial blocks so they merge instead of staying visible.
 - Made OOC and FLASH consistent across modes: OOC ends with an empty `mode=OOC` envelope; FLASH ends with its `<flash_handoff/>`.
 - Injected the `ST_GFX V1` rules in SHADOW and NATIVE while local GFX is enabled, so the preset's Pop-In Graphics prompt is no longer needed.
 

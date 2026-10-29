@@ -59,6 +59,41 @@ test('injected protocol carries GFX rules only while the GFX resolver allows the
     assert.doesNotMatch(context.injection[1], /ST_GFX\nV1|Pop-in graphic/);
 });
 
+test('Hybrid Native merges a partial block wrapped as the protocol template shows', async () => {
+    const { context, engine, store } = setup();
+    setChatMode(context.chatMetadata, 'NATIVE');
+    const fragment = [
+        '<!-- GFX_START -->',
+        '<internal_states>',
+        '<details><summary>🎬 INTERNAL STATES (Turn: 1)</summary>',
+        '<details><summary>💚 BONDS</summary>',
+        '- Profile Alice→User: Type=neutral | Route=approach | Trust=Guarded | Attraction=latent | Expect=None | Public/Private=friendly/wary | Jealousy=none | Boundary=None | Anchors=None',
+        '</details>',
+        "<details><summary>🔫 CHEKHOV'S GUN</summary>",
+        '- Active: [BULLET: Why Alice moved rooms] (weight:2, age:0)',
+        '- Locked: None',
+        '- Fired: None',
+        '</details>',
+        '<details><summary>🎒 INV & SKILLS</summary>',
+        '- <b>Inv:</b> Dorm key, phone',
+        '- <b>Titles/Skills:</b> Hardware tinkerer',
+        '- <b>Status:</b> Healthy',
+        '- <b>Mods:</b> None',
+        '</details>',
+        '</details>',
+        '</internal_states>',
+        '<!-- GFX_END -->',
+    ].join('\n');
+    const message = { is_user: false, mes: `[ 🕰️ Time 2:04 PM | 🗓️ Day 1 - Thursday ]\nAlice waves.\n${fragment}\n<!--ST_PATCH\nV2\nbase=GENESIS\nmode=NORMAL\ntx=turn-1\n-->` };
+    const result = await engine.processAssistantMessage(message, { index: 0, messageIdentity: 'native-compat' });
+    assert.equal(result.status, 'native_committed');
+    const saved = store.load();
+    assert.match(JSON.stringify(saved.chekhov), /Why Alice moved rooms/);
+    assert.match(JSON.stringify(saved.inventory), /Dorm key/);
+    assert.ok(Object.keys(saved.relations.profiles).length > 0);
+    assert.doesNotMatch(message.mes, /internal_states|CHEKHOV/);
+});
+
 test('Hybrid Native commits an authoritative patch without a full legacy block', async () => {
     const { context, engine, store } = setup();
     setChatMode(context.chatMetadata, 'NATIVE');

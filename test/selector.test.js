@@ -36,7 +36,7 @@ test('protocol keeps an ordinary zero-delta RP turn NORMAL', () => {
     const prompt = buildProtocolPrompt(createEmptyState({ now: 1 })).text;
     assert.match(prompt, /ST-STATE SHADOW PROTOCOL v2/);
     assert.match(prompt, /ST_DICE_POOL v1\nBOOTSTRAP:ACTIVE_CARD_NPC\|d20\|\d+\nEND_ST_DICE_POOL/);
-    assert.match(prompt, /NORMAL reply order: the preset's header, prose, the <internal_states> block, one ST_PATCH/);
+    assert.match(prompt, /NORMAL reply order: the exact header line from the preset's <header_instructions> .*never a markdown heading\), prose, the <internal_states> block, one ST_PATCH/);
     assert.match(prompt, /Nothing comes before the header/);
     assert.match(prompt, /A turn with no changes still sends the headers; ct advances on its own/);
     assert.match(prompt, /valence, arousal, and dominance -2\.\.2/);
@@ -89,7 +89,9 @@ test('Hybrid Native injects local frame, authoritative patch rules, compatibilit
     assert.match(prompt.text, /ST_DICE_POOL v1\nAL\|d20\|14\nEND_ST_DICE_POOL/);
     assert.match(prompt.text, /never output the full legacy state/);
     assert.match(prompt.text, /Write the patch once, in the reply, not in reasoning/);
-    assert.match(prompt.text, /only those changed sections/);
+    assert.match(prompt.text, /only those changed sections \(BONDS holds only Profile rows\), wrapped exactly like this/);
+    assert.match(prompt.text, /<!-- GFX_START -->\n<internal_states>\n<details><summary>🎬 INTERNAL STATES \(Turn: 1\)<\/summary>\n[^\n]*\n<\/details>\n<\/internal_states>\n<!-- GFX_END -->/);
+    assert.match(prompt.text, /NORMAL reply order: the exact header line from the preset's <header_instructions>/);
     assert.match(prompt.text, /The patch replaces the NPC STATE, SCENE & WORLD, numeric BONDS, and EMOTIONAL RESIDUE sections/);
     assert.match(prompt.text, /residue\.set\|RID\|field\|value/);
     assert.match(prompt.text, /actor\.hold\|ID\|field\|value/);

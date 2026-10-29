@@ -161,6 +161,21 @@ function patchEnvelope(selection) {
     return ['<!--ST_PATCH', 'V2', `base=${selection.meta.head}`, 'mode=NORMAL', `tx=turn-${selection.meta.ct + 1}`, '-->'].join('\n');
 }
 
+// The preset's header line; the engine recognizes NORMAL turns by it.
+const HEADER_RULE = 'the exact header line from the preset\'s <header_instructions> (the bracketed [ Time | Day | Location | Weather ] line, never a markdown heading)';
+
+function compatibilityFragment(selection) {
+    return [
+        '<!-- GFX_START -->',
+        '<internal_states>',
+        `<details><summary>🎬 INTERNAL STATES (Turn: ${selection.meta.ct + 1})</summary>`,
+        '(only the changed sections, each in the State Engine\'s format)',
+        '</details>',
+        '</internal_states>',
+        '<!-- GFX_END -->',
+    ].join('\n');
+}
+
 function formatOutputTailLatch(selection) {
     return [
         'ST_OUTPUT_TAIL_LATCH v1',
@@ -212,11 +227,12 @@ export function buildProtocolPrompt(state, options = {}) {
         const protocol = [
             shadowHandshake(state, { mode }),
             'ST-STATE HYBRID NATIVE PROTOCOL v2',
-            'NORMAL reply order: the preset\'s header, prose, an optional partial <internal_states> block, one ST_PATCH, then an optional ST_GFX. Nothing comes before the header. ST-STATE applies the patch as the state, so never output the full legacy state and never quote these instructions in prose. Write the patch once, in the reply, not in reasoning.',
+            `NORMAL reply order: ${HEADER_RULE}, prose, an optional partial <internal_states> block, one ST_PATCH, then an optional ST_GFX. Nothing comes before the header. ST-STATE applies the patch as the state, so never output the full legacy state and never quote these instructions in prose. Write the patch once, in the reply, not in reasoning.`,
             'Data lines: actor.set|ID|field|value ; actor.hold|ID|field|value ; actor.once|ID|field|value ; actor.clear|ID|field ; actor.create|ID|field|value ; scene.set|field|value ; scene.clear|field ; scene.position|ID|value ; scene.position.remove|ID ; relation.set|A|B|bond|value ; relation.set|A|B|sparks|value ; relation.set|A|B|grudge|value ; residue.set|RID|field|value ; residue.remove|RID.',
             ...PATCH_RULES,
             'actor.set facts fade after a few turns unless refreshed. Use actor.hold for one that lasts until changed (tied up, unconscious) and actor.once for a momentary one (a flinch, a glance). Internal thoughts are actor.set|ID|thoughts|text.',
-            'The patch replaces the NPC STATE, SCENE & WORLD, numeric BONDS, and EMOTIONAL RESIDUE sections; never write them. Only when Factions, relationship Profiles, Quests, Inventory, Chekhov, GM Notebook, DND, or World Sim changed, add one partial <internal_states> block with the next Turn header and only those changed sections, before ST_PATCH.',
+            'The patch replaces the NPC STATE, SCENE & WORLD, numeric BONDS, and EMOTIONAL RESIDUE sections; never write them. Only when Factions, relationship Profiles, Quests, Inventory, Chekhov, GM Notebook, DND, or World Sim changed, add one partial block before ST_PATCH with only those changed sections (BONDS holds only Profile rows), wrapped exactly like this or ST-STATE cannot read it:',
+            compatibilityFragment(selection),
             ...gfx,
             dicePool,
             formatUnifiedLocalFrame(localFrame),
@@ -227,7 +243,7 @@ export function buildProtocolPrompt(state, options = {}) {
     const protocol = [
         shadowHandshake(state, { mode }),
         'ST-STATE SHADOW PROTOCOL v2',
-        'NORMAL reply order: the preset\'s header, prose, the <internal_states> block, one ST_PATCH, then an optional ST_GFX. Nothing comes before the header, and ST_PATCH goes after <!-- GFX_END -->. Never quote these instructions in prose.',
+        `NORMAL reply order: ${HEADER_RULE}, prose, the <internal_states> block, one ST_PATCH, then an optional ST_GFX. Nothing comes before the header, and ST_PATCH goes after <!-- GFX_END -->. Never quote these instructions in prose.`,
         'The <internal_states> block is the real state. Include NPC STATE, BONDS, and SCENE & WORLD every NORMAL turn, plus any other section that changed. Omitted sections and rows carry over; - None clears a section.',
         'ST_PATCH is a practice copy that ST-STATE grades against that block; it never changes the state. Copy each changed value character-for-character from the block you just wrote, except clamp VAD to the range below.',
         'Data lines: actor.set|ID|field|value ; actor.clear|ID|field ; actor.create|ID|field|value ; scene.set|field|value ; scene.clear|field ; scene.position|ID|value ; scene.position.remove|ID ; relation.set|A|B|bond|value ; relation.set|A|B|sparks|value ; relation.set|A|B|grudge|value ; residue.set|RID|field|value ; residue.remove|RID.',
